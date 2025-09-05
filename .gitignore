@@ -27,6 +27,9 @@ dist-ssr
 # Ignore environment variables
 .env
 
+# Ignore uploaded files
+backend/uploads/
+
 # Ignore any API key screenshots or sensitive assets
 open AI api key.png
 
