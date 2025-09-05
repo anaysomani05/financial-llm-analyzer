@@ -22,7 +22,6 @@ export interface CreditReport {
 interface UploadedFileData {
   file: File;
   filename: string;
-  fileBuffer: string;
 }
 
 const Index = () => {
@@ -55,8 +54,7 @@ const Index = () => {
       
       setUploadedFile({
         file: file,
-        filename: result.filename,
-        fileBuffer: result.fileBuffer
+        filename: result.filename
       });
       setUploadedFilename(result.filename);
       setGeneratedReport(null);
@@ -94,7 +92,7 @@ const Index = () => {
       return;
     }
     
-    if (!uploadedFile.filename || !uploadedFile.fileBuffer) {
+    if (!uploadedFile.filename) {
       toast({ title: "Error", description: "File data is incomplete. Please upload the file again.", variant: "destructive" });
       return;
     }
@@ -108,8 +106,7 @@ const Index = () => {
     // Debug: Log what we're sending
     console.log('Sending to API:', {
       filename: uploadedFile.filename,
-      companyName: companyName,
-      fileBufferLength: uploadedFile.fileBuffer?.length || 0
+      companyName: companyName
     });
 
     try {
@@ -121,7 +118,6 @@ const Index = () => {
         body: JSON.stringify({
           filename: uploadedFile.filename,
           companyName: companyName.trim(),
-          fileBuffer: uploadedFile.fileBuffer,
         }),
       });
 
