@@ -41,6 +41,28 @@ Transform any financial document into actionable intelligence using advanced LLM
 - **OpenAI GPT-4** - LLM analysis and embeddings
 - **Vector Store** - In-memory semantic search
 
+## Project Setup
+
+### Backend Setup
+```bash
+cd backend
+npm install
+npm run dev
+```
+
+### Frontend Setup
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Environment Variables
+Create `.env` file in backend directory:
+```
+OPENAI_API_KEY=your_openai_api_key
+```
+
 ## Try It Here
 
 **Link**: [financial-llm.vercel.app](https://financial-llm.vercel.app)
