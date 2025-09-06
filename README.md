@@ -63,12 +63,6 @@ Create `.env` file in backend directory:
 OPENAI_API_KEY=your_openai_api_key
 ```
 
-## Try It Here
-
-**Link**: [financial-llm.vercel.app](https://financial-llm.vercel.app)
-
-Experience the full power of FinancialLLM Analyzer directly in your browser. Upload any financial document and get instant AI-powered analysis.
-
 ## Project Structure
 
 ### Frontend
