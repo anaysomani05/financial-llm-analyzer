@@ -43,14 +43,20 @@ Transform any financial document into actionable intelligence using advanced LLM
 
 ## Project Setup
 
-### Backend Setup
+### 1. Root (shared code)
+```bash
+npm install
+```
+Installs dependencies for the `shared/` module used by backend and api.
+
+### 2. Backend
 ```bash
 cd backend
 npm install
 npm run dev
 ```
 
-### Frontend Setup
+### 3. Frontend
 ```bash
 cd frontend
 npm install
@@ -65,28 +71,30 @@ OPENAI_API_KEY=your_openai_api_key
 
 ## Project Structure
 
-### Frontend
 ```
-src/
-├── components/           # React components
-│   ├── ui/              # Reusable UI components
-│   ├── ChatInterface.tsx
-│   ├── FileUpload.tsx
-│   ├── ReportGenerator.tsx
-│   └── ReportDisplay.tsx
-├── hooks/               # Custom React hooks
-├── pages/               # Application pages
-└── lib/                 # Utility libraries
-```
-
-### Backend
-```
-backend/
-├── server.js            # Express server & API endpoints
-├── aiProcessor.js       # LLM processing & RAG logic
+shared/                  # Shared logic (backend + api)
+├── config.js            # Chunk size, model, etc.
 ├── pdfProcessor.js      # PDF text extraction
-├── package.json         # Dependencies
+└── aiProcessor.js       # RAG, report generation, Q&A
+
+backend/
+├── config.js            # Server port, etc.
+├── server.js            # Express server & API endpoints
+├── package.json
 └── uploads/             # Temporary file storage
+
+api/                     # Serverless handlers (e.g. Vercel)
+├── generate-report.js   # Uses shared/
+├── ask-question.js
+└── vector-cache.js
+
+frontend/src/
+├── components/          # ChatInterface, FileUpload, ReportDisplay
+├── constants/           # reportSections config
+├── hooks/
+├── lib/                 # api.ts (API client), utils
+├── pages/
+└── types/               # CreditReport, etc.
 ```
 
 ## API Endpoints

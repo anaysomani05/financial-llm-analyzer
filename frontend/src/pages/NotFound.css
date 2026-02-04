@@ -1,0 +1,36 @@
+/* NotFound page styles */
+
+.not-found {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgb(243 244 246);
+}
+
+.not-found-content {
+  text-align: center;
+}
+
+.not-found h1 {
+  font-size: 2.25rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  color: rgb(17 24 39);
+}
+
+.not-found p {
+  font-size: 1.25rem;
+  color: rgb(75 85 99);
+  margin-bottom: 1rem;
+}
+
+.not-found a {
+  color: rgb(59 130 246);
+  font-weight: 500;
+  text-decoration: underline;
+}
+
+.not-found a:hover {
+  color: rgb(29 78 216);
+}

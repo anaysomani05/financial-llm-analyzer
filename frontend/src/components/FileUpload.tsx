@@ -3,20 +3,20 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, FileText, AlertCircle, Link } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { Upload, FileText, AlertCircle, Link2, CheckCircle2 } from 'lucide-react';
 
 interface FileUploadProps {
-  onFileUpload: (file: File) => void;
+  onAnalyze: (file: File) => void;
   onUrlSubmit: (url: string) => void;
+  isAnalyzing?: boolean;
+  isLoading?: boolean;
 }
 
-export const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload, onUrlSubmit }) => {
+export const FileUpload: React.FC<FileUploadProps> = ({ onAnalyze, onUrlSubmit, isAnalyzing = false, isLoading = false }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [url, setUrl] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { toast } = useToast();
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -28,7 +28,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload, onUrlSubmi
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragOver(false);
-    
     const file = event.dataTransfer.files[0];
     if (file && file.type === 'application/pdf') {
       setSelectedFile(file);
@@ -49,114 +48,121 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload, onUrlSubmi
     fileInputRef.current?.click();
   };
 
-  const handleUploadClick = () => {
-    if (selectedFile) {
-      onFileUpload(selectedFile);
-      setSelectedFile(null);
-    }
+  const handleAnalyzeClick = () => {
+    if (selectedFile) onAnalyze(selectedFile);
   };
 
   const handleUrlSubmit = () => {
-    if (url.trim()) {
-      onUrlSubmit(url.trim());
-      setUrl('');
-    }
+    if (url.trim()) onUrlSubmit(url.trim());
+    setUrl('');
   };
 
   return (
     <Tabs defaultValue="upload" className="w-full">
-      <TabsList className="grid w-full grid-cols-2 mb-6">
-        <TabsTrigger value="upload">Upload Document</TabsTrigger>
-        <TabsTrigger value="url">From URL</TabsTrigger>
+      <TabsList className="grid w-full grid-cols-2 h-12 p-1 bg-slate-100 rounded-xl">
+        <TabsTrigger value="upload" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm font-medium">
+          Upload PDF
+        </TabsTrigger>
+        <TabsTrigger value="url" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm font-medium">
+          From URL
+        </TabsTrigger>
       </TabsList>
 
-      <TabsContent value="upload">
+      <TabsContent value="upload" className="mt-6">
         <div className="space-y-6">
-          <Card 
-            className={`p-8 border-2 border-dashed transition-colors cursor-pointer hover:bg-slate-50 ${
-              isDragOver ? 'border-blue-500 bg-blue-50' : 'border-slate-300'
+          <Card
+            className={`p-10 sm:p-12 border-2 border-dashed rounded-2xl cursor-pointer transition-all duration-200 min-h-[220px] flex flex-col justify-center ${
+              isDragOver
+                ? 'border-blue-500 bg-blue-50/80 ring-2 ring-blue-200 ring-offset-2'
+                : 'border-slate-300 bg-white/80 hover:border-slate-400 hover:bg-slate-50/50'
             }`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onClick={openFileDialog}
           >
-            <div className="text-center space-y-4">
-              <div className="bg-blue-100 p-3 rounded-full w-fit mx-auto">
-                <Upload className="h-8 w-8 text-blue-600" />
+            <div className="text-center space-y-5">
+              <div className={`p-4 rounded-2xl w-fit mx-auto ${isDragOver ? 'bg-blue-100' : 'bg-slate-100'}`}>
+                <Upload className={`h-10 w-10 ${isDragOver ? 'text-blue-600' : 'text-slate-500'}`} />
               </div>
-              
               <div>
-                <h3 className="text-lg font-semibold text-slate-900 mb-2">
-                  Upload Financial Document
+                <h3 className="text-lg font-semibold text-slate-900 mb-1.5">
+                  {isDragOver ? 'Drop your PDF here' : 'Upload financial document'}
                 </h3>
-                <p className="text-slate-600 mb-4">
-                  Drag and drop your PDF file here, or click to browse
+                <p className="text-slate-600 text-sm mb-4">
+                  Drag and drop or click to browse
                 </p>
-                
-                <div className="flex items-center justify-center space-x-2 text-sm text-slate-500">
-                  <AlertCircle className="h-4 w-4" />
-                  <span>Supports quarterly reports, SEC filings, 10-K/10-Q forms, earnings transcripts, annual reports</span>
+                <div className="flex items-center justify-center gap-2 text-xs text-slate-500 flex-wrap">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  <span>PDF only — 10-K, 10-Q, quarterly reports, earnings</span>
                 </div>
               </div>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
             </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
           </Card>
 
           {selectedFile && (
-            <Card className="p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <FileText className="h-8 w-8 text-blue-600" />
-                  <div>
-                    <h4 className="font-semibold text-slate-900">{selectedFile.name}</h4>
-                    <p className="text-sm text-slate-600">
-                      {(selectedFile.size / 1024 / 1024).toFixed(1)} MB
+            <Card className="p-5 rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="bg-emerald-50 p-3 rounded-xl shrink-0">
+                    <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-900 truncate">{selectedFile.name}</p>
+                    <p className="text-sm text-slate-500">
+                      {(selectedFile.size / 1024 / 1024).toFixed(2)} MB · Ready to analyze
                     </p>
                   </div>
                 </div>
-                
-                <Button onClick={handleUploadClick} className="bg-blue-600 hover:bg-blue-700">
-                  Process Document
+                <Button
+                  onClick={handleAnalyzeClick}
+                  disabled={isAnalyzing}
+                  className="bg-slate-800 hover:bg-slate-900 text-white h-11 px-6 rounded-xl font-medium shrink-0 w-full sm:w-auto focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+                >
+                  {isAnalyzing ? 'Analyzing…' : 'Analyze'}
                 </Button>
               </div>
             </Card>
           )}
         </div>
       </TabsContent>
-      
-      <TabsContent value="url">
-        <Card className="p-8">
-          <div className="text-center space-y-4">
-            <div className="bg-blue-100 p-3 rounded-full w-fit mx-auto">
-              <Link className="h-8 w-8 text-blue-600" />
+
+      <TabsContent value="url" className="mt-6">
+        <Card className="p-8 rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="bg-slate-100 p-3 rounded-xl">
+                <Link2 className="h-6 w-6 text-slate-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Analyze from URL</h3>
+                <p className="text-sm text-slate-600">Public PDF link (SEC, investor relations, etc.)</p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-lg font-semibold text-slate-900 mb-2">
-                Process Financial Document from URL
-              </h3>
-              <p className="text-slate-600 mb-4">
-                Enter the public URL of a PDF financial document (SEC filings, quarterly reports, etc.).
-              </p>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Input
+                type="url"
+                placeholder="https://…"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                disabled={isLoading || isAnalyzing}
+                className="flex-1 h-11 rounded-xl border-slate-200 focus-visible:ring-2 focus-visible:ring-slate-400"
+              />
+              <Button
+                onClick={handleUrlSubmit}
+                disabled={!url.trim() || isLoading || isAnalyzing}
+                className="bg-slate-800 hover:bg-slate-900 h-11 px-6 rounded-xl font-medium shrink-0 focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+              >
+                {isLoading ? 'Fetching…' : isAnalyzing ? 'Analyzing…' : 'Fetch & analyze'}
+              </Button>
             </div>
-          </div>
-          <div className="flex w-full items-center space-x-2 mt-4">
-            <Input 
-              type="url" 
-              placeholder="https://example.com/10k-report.pdf" 
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-            />
-            <Button onClick={handleUrlSubmit} className="bg-blue-600 hover:bg-blue-700">
-              Fetch and Process
-            </Button>
           </div>
         </Card>
       </TabsContent>

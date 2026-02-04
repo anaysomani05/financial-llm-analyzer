@@ -1,0 +1,10 @@
+{
+  "name": "financial-llm-analyzer",
+  "private": true,
+  "description": "Monorepo root – shared code used by backend and api",
+  "dependencies": {
+    "@langchain/openai": "^0.1.3",
+    "langchain": "^0.2.5",
+    "pdf-parse": "^1.1.1"
+  }
+}

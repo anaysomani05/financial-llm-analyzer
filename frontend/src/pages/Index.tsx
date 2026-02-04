@@ -1,310 +1,191 @@
+import './Index.css';
 import React, { useState } from 'react';
 import { FileUpload } from '@/components/FileUpload';
-import { ReportGenerator } from '@/components/ReportGenerator';
 import { ReportDisplay } from '@/components/ReportDisplay';
 import { ChatInterface } from '@/components/ChatInterface';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { FileText, TrendingUp, Shield, Users, Zap, Building2, ExternalLink } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { FileText, TrendingUp, Shield, Users, Zap } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-
-export interface CreditReport {
-  companyName: string;
-  overview: string;
-  financialHighlights: string;
-  keyRisks: string;
-  managementCommentary: string;
-  generatedAt: string;
-}
-
-interface UploadedFileData {
-  file: File;
-  filename: string;
-}
+import type { CreditReport } from '@/types';
+import {
+  uploadDocument,
+  generateReport,
+  fetchPdfFromUrl,
+  askQuestion as apiAskQuestion,
+} from '@/lib/api';
 
 const Index = () => {
-  const [uploadedFile, setUploadedFile] = useState<UploadedFileData | null>(null);
-  const [uploadedFilename, setUploadedFilename] = useState<string | null>(null);
   const [generatedReport, setGeneratedReport] = useState<CreditReport | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [sessionFilename, setSessionFilename] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const [sessionFilename, setSessionFilename] = useState<string | null>(null);
-
-  const handleFileUpload = async (file: File) => {
-    const formData = new FormData();
-    formData.append('report', file);
-
-    setIsProcessing(true);
-    toast({ title: "Uploading file...", description: "Please wait while the document is uploaded." });
-    try {
-          const response = await fetch('/api/upload', {
-      method: 'POST',
-      body: formData,
+  const handleAnalyze = async (file: File) => {
+    setIsAnalyzing(true);
+    toast({
+      title: 'Analysis started',
+      description: 'Uploading and analyzing the document. This may take a few minutes.',
     });
-
-      if (!response.ok) {
-        throw new Error('File upload failed');
-      }
-
-      const result = await response.json();
-      toast({ title: "File uploaded successfully!", description: `${file.name} is ready for analysis.` });
-      
-      setUploadedFile({
-        file: file,
-        filename: result.filename
+    try {
+      const { filename } = await uploadDocument(file);
+      const report = await generateReport(filename);
+      setGeneratedReport(report);
+      setSessionFilename(filename);
+      toast({ title: 'Analysis complete', description: 'Your report has been generated.' });
+    } catch (err) {
+      console.error('Analyze error:', err);
+      toast({
+        title: 'Analysis failed',
+        description: err instanceof Error ? err.message : 'Something went wrong.',
+        variant: 'destructive',
       });
-      setUploadedFilename(result.filename);
-      setGeneratedReport(null);
-      
-    } catch (error) {
-      toast({ title: "Error", description: "Could not upload file. Please try again.", variant: "destructive"});
     } finally {
-      setIsProcessing(false);
+      setIsAnalyzing(false);
     }
   };
 
   const handleUrlSubmit = async (url: string) => {
-    setIsProcessing(true);
-    toast({ title: "Fetching file from URL..." });
+    setIsUploading(true);
     try {
-      const response = await fetch(`/api/fetch-pdf?url=${encodeURIComponent(url)}`);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch PDF from URL: ${response.statusText}`);
-      }
-      const blob = await response.blob();
+      const blob = await fetchPdfFromUrl(url);
       const fileName = url.substring(url.lastIndexOf('/') + 1) || 'report.pdf';
       const file = new File([blob], fileName, { type: 'application/pdf' });
-      
-      await handleFileUpload(file);
-    } catch (error) {
-      toast({ title: "Error", description: `Could not fetch from URL: ${error.message}`, variant: "destructive"});
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleStartAnalysis = async (companyName: string) => {
-    if (!uploadedFile) {
-      toast({ title: "Error", description: "No uploaded file found to analyze.", variant: "destructive" });
-      return;
-    }
-    
-    if (!uploadedFile.filename) {
-      toast({ title: "Error", description: "File data is incomplete. Please upload the file again.", variant: "destructive" });
-      return;
-    }
-    
-    setIsProcessing(true);
-    toast({ title: "Analysis Started", description: "The AI is now processing the document. This may take a few minutes." });
-
-    // Store the original filename to be used for the Q&A session
-    const originalFilename = uploadedFile.filename;
-
-    // Debug: Log what we're sending
-    console.log('Sending to API:', {
-      filename: uploadedFile.filename,
-      companyName: companyName
-    });
-
-    try {
-      const response = await fetch('/api/generate-report', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          filename: uploadedFile.filename,
-          companyName: companyName.trim(),
-        }),
+      await handleAnalyze(file);
+    } catch (err) {
+      toast({
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to fetch PDF.',
+        variant: 'destructive',
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('API Error Response:', errorText);
-        throw new Error(errorText || 'Report generation failed on the server.');
-      }
-      
-      const reportSections = await response.json();
-      
-      const finalReport: CreditReport = {
-        ...reportSections,
-        companyName,
-        generatedAt: new Date().toISOString(),
-      };
-
-      setGeneratedReport(finalReport);
-      setSessionFilename(originalFilename); // Use the original filename for Q&A
-
-      toast({ title: "Analysis Complete!", description: "Your report has been successfully generated." });
-
-    } catch (error) {
-      console.error('Analysis Error:', error);
-      toast({ title: "Analysis Failed", description: `${error.message}`, variant: "destructive"});
     } finally {
-      setIsProcessing(false);
-      setUploadedFile(null); // Clear the uploaded file view
-      setUploadedFilename(null); // Clear the temp filename from upload state
+      setIsUploading(false);
     }
   };
 
   const resetApplication = () => {
-    setUploadedFile(null);
-    setUploadedFilename(null);
     setGeneratedReport(null);
-    setIsProcessing(false);
+    setIsUploading(false);
+    setIsAnalyzing(false);
     setSessionFilename(null);
   };
 
   const handleAskQuestion = async (question: string): Promise<string> => {
     if (!generatedReport || !sessionFilename) {
-      return "Cannot ask questions until a report has been generated.";
+      return 'Cannot ask questions until a report has been generated.';
     }
-
     try {
-      const response = await fetch('/api/ask-question', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          filename: sessionFilename,
-          question,
-          companyName: generatedReport.companyName,
-        }),
+      return await apiAskQuestion({
+        filename: sessionFilename,
+        question,
+        companyName: generatedReport.companyName,
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        return `Error from server: ${errorText}`;
-      }
-
-      const data = await response.json();
-      return data.answer;
-    } catch (error) {
-      console.error('Error answering question:', error);
-      return "An unexpected error occurred while trying to get an answer.";
+    } catch (err) {
+      console.error('Error answering question:', err);
+      return err instanceof Error ? err.message : 'An unexpected error occurred.';
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="bg-blue-600 p-2 rounded-lg">
-                <TrendingUp className="h-6 w-6 text-white" />
+    <div className="page">
+      <header className="header">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-4">
+              <div className="bg-slate-800 p-2.5 rounded-xl shadow-sm">
+                <TrendingUp className="h-6 w-6 text-amber-400" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-slate-900">FinancialLLM Analyzer</h1>
-                <p className="text-slate-600">Transform Any Financial Document into Actionable Intelligence</p>
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">FinancialLLM Analyzer</h1>
+                <p className="text-sm text-slate-500 mt-0.5">Document intelligence with RAG</p>
               </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <Badge variant="secondary" className="bg-green-100 text-green-800">
-                Universal Analysis
-              </Badge>
             </div>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 min-h-[16rem]">
-        {!uploadedFile && !generatedReport && (
-          <div className="text-center space-y-8">
-            {/* Hero Section & Features etc. - no change here */}
-            <div className="space-y-4">
-              <h2 className="text-4xl font-bold text-slate-900">
-                Transform Financial Documents into 
-                <span className="text-blue-600"> Actionable Insights</span>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-12 min-h-[16rem]">
+        {!generatedReport && (
+          <div className="text-center space-y-12">
+            <div className="space-y-5 max-w-3xl mx-auto">
+              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-slate-900 leading-tight tracking-tight">
+                Transform financial documents into{' '}
+                <span className="text-slate-700 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">actionable insights</span>
               </h2>
-              <p className="text-xl text-slate-600 max-w-3xl mx-auto">
-                Analyze quarterly results, SEC filings, 10-K reports, earnings transcripts, and financial documents from companies worldwide with AI-powered intelligence.
+              <p className="text-lg sm:text-xl text-slate-600 leading-relaxed">
+                Analyze 10-Ks, quarterly reports, SEC filings, and earnings materials with AI-powered analysis and Q&A.
               </p>
             </div>
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl mx-auto">
-              <Card className="p-6 text-center space-y-4 hover:shadow-lg transition-shadow">
-                <div className="bg-blue-100 p-3 rounded-full w-fit mx-auto">
-                  <FileText className="h-6 w-6 text-blue-600" />
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 max-w-6xl mx-auto">
+              <Card className="feature-card text-center space-y-4 bg-white/90 backdrop-blur-sm">
+                <div className="bg-slate-100 p-3.5 rounded-2xl w-fit mx-auto">
+                  <FileText className="h-6 w-6 text-slate-700" />
                 </div>
-                <h3 className="text-lg font-semibold text-slate-900">Universal Document Processing</h3>
-                <p className="text-slate-600">Process quarterly reports, SEC filings, 10-K/10-Q forms, earnings transcripts, and annual reports</p>
+                <h3 className="text-base font-semibold text-slate-900">Document processing</h3>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  Quarterly reports, SEC filings, 10-K/10-Q, earnings transcripts
+                </p>
               </Card>
-              <Card className="p-6 text-center space-y-4 hover:shadow-lg transition-shadow">
-                <div className="bg-green-100 p-3 rounded-full w-fit mx-auto">
-                  <Zap className="h-6 w-6 text-green-600" />
+              <Card className="feature-card text-center space-y-4 bg-white/90 backdrop-blur-sm">
+                <div className="bg-emerald-50 p-3.5 rounded-2xl w-fit mx-auto">
+                  <Zap className="h-6 w-6 text-emerald-600" />
                 </div>
-                <h3 className="text-lg font-semibold text-slate-900">LLM-Powered Analysis</h3>
-                <p className="text-slate-600">Advanced language models with intelligent RAG processing for comprehensive financial insights</p>
+                <h3 className="text-base font-semibold text-slate-900">LLM + RAG analysis</h3>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  Semantic search and structured sections from your documents
+                </p>
               </Card>
-              <Card className="p-6 text-center space-y-4 hover:shadow-lg transition-shadow">
-                <div className="bg-purple-100 p-3 rounded-full w-fit mx-auto">
-                  <Shield className="h-6 w-6 text-purple-600" />
+              <Card className="feature-card text-center space-y-4 bg-white/90 backdrop-blur-sm">
+                <div className="bg-amber-50 p-3.5 rounded-2xl w-fit mx-auto">
+                  <Shield className="h-6 w-6 text-amber-600" />
                 </div>
-                <h3 className="text-lg font-semibold text-slate-900">Risk Assessment</h3>
-                <p className="text-slate-600">Comprehensive identification of business, financial, and market risks across all document types</p>
+                <h3 className="text-base font-semibold text-slate-900">Risk assessment</h3>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  Business, financial, and market risks identified and summarized
+                </p>
               </Card>
-              <Card className="p-6 text-center space-y-4 hover:shadow-lg transition-shadow">
-                <div className="bg-purple-100 p-3 rounded-full w-fit mx-auto">
-                  <Users className="h-6 w-6 text-purple-600" />
+              <Card className="feature-card text-center space-y-4 bg-white/90 backdrop-blur-sm">
+                <div className="bg-violet-50 p-3.5 rounded-2xl w-fit mx-auto">
+                  <Users className="h-6 w-6 text-violet-600" />
                 </div>
-                <h3 className="text-lg font-semibold text-slate-900">Executive Insights</h3>
-                <p className="text-slate-600">Extract management commentary, strategic direction, and forward-looking statements</p>
+                <h3 className="text-base font-semibold text-slate-900">Executive insights</h3>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  Management commentary and strategic direction
+                </p>
               </Card>
             </div>
-            {/* Upload Section */}
             <div className="max-w-2xl mx-auto">
-              <FileUpload onFileUpload={handleFileUpload} onUrlSubmit={handleUrlSubmit} />
-            </div>
-          </div>
-        )}
-
-        {uploadedFile && !generatedReport && !isProcessing && (
-          <div className="max-w-4xl mx-auto">
-            <ReportGenerator 
-              file={uploadedFile.file} 
-              onStartAnalysis={handleStartAnalysis}
-              isProcessing={isProcessing}
-            />
-          </div>
-        )}
-
-        {isProcessing && !generatedReport && (
-          <div className="max-w-4xl mx-auto text-center space-y-8 py-12">
-            <div className="animate-pulse">
-              <div className="bg-blue-100 p-6 rounded-full w-fit mx-auto mb-6">
-                <Users className="h-12 w-12 text-blue-600" />
-              </div>
-              <h3 className="text-2xl font-semibold text-slate-900 mb-4">Processing Your Financial Document</h3>
-              <p className="text-lg text-slate-600">Our AI is analyzing the document... Please be patient.</p>
-            </div>
-            <div className="w-full max-w-md mx-auto bg-slate-200 rounded-full h-3">
-              <div className="bg-blue-600 h-3 rounded-full animate-pulse" style={{ width: '75%' }}></div>
+              <FileUpload
+                onAnalyze={handleAnalyze}
+                onUrlSubmit={handleUrlSubmit}
+                isAnalyzing={isAnalyzing}
+                isLoading={isUploading}
+              />
             </div>
           </div>
         )}
 
         {generatedReport && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-slate-900">Generated Financial Analysis Report</h2>
-              <Button onClick={resetApplication} variant="outline">
-                Analyze New Document
+            {/* Report header bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-200">
+              <div>
+                <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">{generatedReport.companyName}</h2>
+                <p className="text-sm text-slate-500 mt-1">Financial Analysis Report</p>
+              </div>
+              <Button onClick={resetApplication} variant="outline" className="shrink-0 border-slate-300 hover:bg-slate-50">
+                New Analysis
               </Button>
             </div>
-            
-            <div className="grid xl:grid-cols-2 gap-6">
-              <div className="order-1">
+
+            {/* Two-column layout */}
+            <div className="grid lg:grid-cols-5 gap-6">
+              <div className="lg:col-span-3">
                 <ReportDisplay report={generatedReport} />
               </div>
-              
-              <div className="order-2 xl:sticky xl:top-6 xl:h-fit">
-                <ChatInterface 
+              <div className="lg:col-span-2 lg:sticky lg:top-6 lg:h-fit">
+                <ChatInterface
                   companyName={generatedReport.companyName}
                   onAskQuestion={handleAskQuestion}
                 />
@@ -314,14 +195,12 @@ const Index = () => {
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 mt-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="text-center">
-            <p className="text-slate-600">
-              Powered by <strong>FinancialLLM Analyzer</strong> - Transform financial documents into actionable intelligence
-            </p>
-          </div>
+      <footer className="header mt-24">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 text-center">
+          <p className="text-slate-500 text-sm">
+            Powered by <strong className="text-slate-700">FinancialLLM Analyzer</strong>
+            <span className="hidden sm:inline"> — Document intelligence with RAG</span>
+          </p>
         </div>
       </footer>
     </div>

@@ -5,131 +5,86 @@ const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const { extractTextFromPDF } = require('./pdfProcessor');
-const { generateReportSections, answerQuestion } = require('./aiProcessor');
+const { extractTextFromPDF } = require('../shared/pdfProcessor');
+const { extractCompanyName, generateReportSections, answerQuestion } = require('../shared/aiProcessor');
+const config = require('./config');
 
 const app = express();
-const port = 3001;
-
-// Simple in-memory cache for vector stores
 const vectorStoreCache = new Map();
 
-// Ensure the uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
 }
 
-// Set up Multer for file storage
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/');
-  },
-  filename: function (req, file, cb) {
-    // Use a timestamp to make filenames unique
-    cb(null, Date.now() + '-' + file.originalname);
-  }
+  destination: (_req, _file, cb) => cb(null, 'uploads/'),
+  filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
 });
-
-const upload = multer({ storage: storage });
+const upload = multer({ storage });
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+function sendError(res, status, message) {
+  res.status(status).json({ error: message });
+}
+
 app.get('/fetch-pdf', async (req, res) => {
   const { url } = req.query;
-
-  if (!url) {
-    return res.status(400).send('URL is required');
-  }
-
+  if (!url) return sendError(res, 400, 'URL is required');
   try {
-    const response = await axios({
-      method: 'get',
-      url: url,
-      responseType: 'stream',
-    });
-
+    const response = await axios({ method: 'get', url, responseType: 'stream' });
     res.setHeader('Content-Type', 'application/pdf');
     response.data.pipe(res);
-  } catch (error) {
-    console.error('Error fetching PDF:', error.message);
-    res.status(500).send('Failed to fetch PDF');
+  } catch (err) {
+    console.error('Error fetching PDF:', err.message);
+    sendError(res, 500, 'Failed to fetch PDF');
   }
 });
 
-// New endpoint for file uploads
 app.post('/api/upload', upload.single('report'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).send('No file uploaded.');
-  }
-
-  console.log('File uploaded:', req.file);
-
-  // Respond with information about the uploaded file
+  if (!req.file) return sendError(res, 400, 'No file uploaded.');
   res.status(200).json({
     message: 'File uploaded successfully',
     filename: req.file.filename,
-    path: req.file.path
+    path: req.file.path,
   });
 });
 
-// New endpoint to trigger report generation
 app.post('/api/generate-report', async (req, res) => {
-  console.log('=== FINANCIAL DOCUMENT ANALYSIS STARTED ===');
-  console.log('Request body:', req.body);
-  
-  const { filename, companyName } = req.body;
+  const { filename, companyName: requestedCompanyName } = req.body;
   const apiKey = process.env.OPENAI_API_KEY;
 
-  if (!filename || !companyName || !apiKey) {
-    console.error('Missing required parameters:', { filename: !!filename, companyName: !!companyName, apiKey: !!apiKey });
-    return res.status(400).send('Missing filename, companyName, or apiKey.');
+  if (!filename || !apiKey) {
+    return sendError(res, 400, 'Missing filename or OPENAI_API_KEY.');
   }
 
   const filePath = path.join(__dirname, 'uploads', filename);
-  console.log('File path:', filePath);
-  console.log('File exists:', fs.existsSync(filePath));
+  if (!fs.existsSync(filePath)) {
+    return sendError(res, 404, 'Uploaded file not found.');
+  }
 
   try {
-    // 1. Extract text from PDF
-    console.log('Step 1: Starting PDF text extraction...');
     const extractedText = await extractTextFromPDF(filePath);
-    console.log('Text extraction completed. Length:', extractedText ? extractedText.length : 0);
-    
-    if (!extractedText) {
-      throw new Error('Text extraction returned empty.');
+    if (!extractedText) return sendError(res, 400, 'Text extraction returned empty.');
+
+    let companyName = (requestedCompanyName && String(requestedCompanyName).trim()) || null;
+    if (!companyName) {
+      companyName = await extractCompanyName(extractedText, apiKey);
     }
 
-    // 2. Generate report sections using AI
-    console.log('Step 2: Starting LLM-powered financial analysis...');
     const { sections, vectorStore } = await generateReportSections(extractedText, companyName, apiKey);
-    console.log('Financial analysis completed. Sections:', Object.keys(sections));
-
-    // Cache the vector store for Q&A
     vectorStoreCache.set(filename, vectorStore);
-    console.log(`Vector store for ${filename} cached for Q&A.`);
 
-    // 3. Send report back to client
-    console.log('Step 3: Sending financial analysis to client...');
-    res.status(200).json(sections);
-    console.log('=== FINANCIAL DOCUMENT ANALYSIS COMPLETED SUCCESSFULLY ===');
-
-  } catch (error) {
-    console.error('=== ERROR DURING FINANCIAL ANALYSIS ===');
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    console.error('=== END ERROR DETAILS ===');
-    res.status(500).send(`Failed to generate financial analysis: ${error.message}`);
+    res.status(200).json({ ...sections, companyName });
+  } catch (err) {
+    console.error('Generate report error:', err);
+    sendError(res, 500, err.message || 'Failed to generate financial analysis.');
   } finally {
-    // 4. Clean up the uploaded file
     fs.unlink(filePath, (err) => {
-      if (err) {
-        console.error('Failed to delete temporary file:', filePath, err);
-      } else {
-        console.log('Successfully deleted temporary file:', filePath);
-      }
+      if (err) console.error('Failed to delete temp file:', filePath, err);
     });
   }
 });
@@ -139,23 +94,23 @@ app.post('/api/ask-question', async (req, res) => {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!filename || !question || !companyName || !apiKey) {
-    return res.status(400).send('Missing required parameters.');
+    return sendError(res, 400, 'Missing required parameters.');
   }
 
   const vectorStore = vectorStoreCache.get(filename);
   if (!vectorStore) {
-    return res.status(404).send('Analysis context not found. Please generate a report first.');
+    return sendError(res, 404, 'Analysis context not found. Please generate a report first.');
   }
 
   try {
     const answer = await answerQuestion(vectorStore, question, companyName, apiKey);
     res.status(200).json({ answer });
-  } catch (error) {
-    console.error('Error in Q&A:', error.message);
-    res.status(500).send('Failed to get an answer.');
+  } catch (err) {
+    console.error('Ask question error:', err.message);
+    sendError(res, 500, 'Failed to get an answer.');
   }
 });
 
-app.listen(port, () => {
-  console.log(`FinancialLLM Analyzer Backend Server running on http://localhost:${port}`);
-}); 
+app.listen(config.port, () => {
+  console.log(`FinancialLLM Analyzer Backend running on http://localhost:${config.port}`);
+});

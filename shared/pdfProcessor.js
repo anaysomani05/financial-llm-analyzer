@@ -1,21 +1,21 @@
 const fs = require('fs');
 const pdf = require('pdf-parse');
 
+/**
+ * Extract raw text from a PDF (file path or buffer).
+ * @param {string|Buffer} input - File path or PDF buffer
+ * @returns {Promise<string>} Extracted text
+ */
 const extractTextFromPDF = async (input) => {
   try {
     let dataBuffer;
-    
-    // Check if input is a file path (string) or a buffer
     if (typeof input === 'string') {
-      // Original behavior for file path
       dataBuffer = fs.readFileSync(input);
     } else if (Buffer.isBuffer(input)) {
-      // New behavior for buffer input
       dataBuffer = input;
     } else {
       throw new Error('Input must be a file path (string) or Buffer');
     }
-    
     const data = await pdf(dataBuffer);
     return data.text;
   } catch (error) {
@@ -24,4 +24,4 @@ const extractTextFromPDF = async (input) => {
   }
 };
 
-module.exports = { extractTextFromPDF }; 
+module.exports = { extractTextFromPDF };
