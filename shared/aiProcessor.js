@@ -6,28 +6,43 @@ const config = require('./config');
 
 const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
+/** Sleep helper for retry delays */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
- * Call OpenAI chat completions API. Single place for all LLM requests.
+ * Call OpenAI chat completions API with retry logic for rate limits.
  */
-async function openaiChatCompletion(apiKey, { messages, max_tokens = 500, temperature = 0.1, model }) {
-  const response = await fetch(OPENAI_CHAT_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: model || config.openai.model,
-      messages,
-      max_tokens,
-      temperature,
-    }),
-  });
-  if (!response.ok) {
+async function openaiChatCompletion(apiKey, { messages, max_tokens = 500, temperature = 0.1, model }, retries = 3) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(OPENAI_CHAT_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: model || config.openai.model,
+        messages,
+        max_tokens,
+        temperature,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return data.choices[0]?.message?.content ?? null;
+    }
+
+    // Handle rate limit (429) with exponential backoff
+    if (response.status === 429 && attempt < retries) {
+      const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+      console.log(`Rate limited. Retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${retries})`);
+      await sleep(delay);
+      continue;
+    }
+
     throw new Error(`OpenAI API failed: ${response.status}`);
   }
-  const data = await response.json();
-  return data.choices[0]?.message?.content ?? null;
 }
 
 /** Clean text: remove page markers and normalize whitespace (regex uses single backslash) */
@@ -182,18 +197,15 @@ async function generateReportSections(extractedText, companyName, apiKey) {
   const documents = await splitTextIntoSemanticChunks(cleanedText);
   const vectorStore = await createVectorStore(documents, apiKey);
 
-  const sectionPromises = SECTION_TYPES.map(async (sectionType) => {
+  // Generate sections sequentially to avoid rate limits
+  const sections = {};
+  for (const sectionType of SECTION_TYPES) {
     const query = SECTION_QUERIES[sectionType](companyName);
     const relevantChunks = await queryRelevantChunks(vectorStore, query);
-    const content = await generateSectionContent(relevantChunks, sectionType, companyName, apiKey);
-    return { sectionType, content };
-  });
-
-  const results = await Promise.all(sectionPromises);
-  const sections = results.reduce((acc, { sectionType, content }) => {
-    acc[sectionType] = content;
-    return acc;
-  }, {});
+    sections[sectionType] = await generateSectionContent(relevantChunks, sectionType, companyName, apiKey);
+    // Small delay between sections to avoid rate limits
+    await sleep(500);
+  }
 
   return { sections, vectorStore };
 }

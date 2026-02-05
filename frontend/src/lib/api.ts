@@ -15,6 +15,13 @@ async function handleResponse<T>(res: Response, parseJson = true): Promise<T> {
     } catch {
       // use text as message
     }
+    // Provide helpful messages for common errors
+    if (message.includes('429')) {
+      throw new Error('Rate limit exceeded. Please wait a moment and try again.');
+    }
+    if (message.includes('401') || message.includes('invalid_api_key')) {
+      throw new Error('API key error. Please check your OpenAI API key.');
+    }
     throw new Error(message || `Request failed: ${res.status}`);
   }
   if (!parseJson) return text as T;
