@@ -30,6 +30,9 @@ dist-ssr
 # Ignore uploaded files
 backend/uploads/
 
+# Ignore test PDF files
+*.pdf
+
 # Ignore any API key screenshots or sensitive assets
 open AI api key.png
 
