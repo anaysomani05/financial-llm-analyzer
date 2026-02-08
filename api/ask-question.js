@@ -23,15 +23,22 @@ module.exports = async function handler(req, res) {
     );
   }
 
-  const vectorStore = await loadVectorStore(filename, apiKey);
-  if (!vectorStore) {
+  const cached = await loadVectorStore(filename, apiKey);
+  if (!cached) {
     return sendError(res, 404, 'Analysis context not found. Please generate a report first.', {
       debug: { filename, ...getCacheInfo() },
     });
   }
 
   try {
-    const answer = await answerQuestion(vectorStore, question, companyName, apiKey);
+    // Pass bm25Index for hybrid search in Q&A
+    const answer = await answerQuestion(
+      cached.vectorStore,
+      question,
+      companyName,
+      apiKey,
+      cached.bm25Index
+    );
     res.status(200).json({ answer });
   } catch (err) {
     console.error('Ask question error:', err.message);

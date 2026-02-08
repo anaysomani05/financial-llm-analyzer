@@ -1,4 +1,4 @@
-const { extractTextFromPDF } = require('../shared/pdfProcessor');
+const { processDocument } = require('../shared/documentProcessor');
 const { extractCompanyName, generateReportSections } = require('../shared/aiProcessor');
 const { saveVectorStore } = require('./vector-cache');
 
@@ -13,7 +13,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return sendError(res, 405, 'Method not allowed');
 
-  const { filename, companyName: requestedCompanyName, fileBuffer } = req.body;
+  const { filename, companyName: requestedCompanyName, fileBuffer, mimetype } = req.body;
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!filename || !fileBuffer || !apiKey) {
@@ -25,19 +25,35 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const pdfBuffer = Buffer.from(fileBuffer, 'base64');
-    const extractedText = await extractTextFromPDF(pdfBuffer);
+    const buffer = Buffer.from(fileBuffer, 'base64');
+
+    // Multi-format document processing
+    const { text: extractedText, format } = await processDocument(buffer, {
+      filename,
+      mimeType: mimetype,
+    });
+
     if (!extractedText) return sendError(res, 400, 'Text extraction returned empty.');
+
+    console.log(`[API] Processed ${format} file: ${filename} (${extractedText.length} chars)`);
 
     let companyName = (requestedCompanyName && String(requestedCompanyName).trim()) || null;
     if (!companyName) {
       companyName = await extractCompanyName(extractedText, apiKey);
     }
 
-    const { sections, vectorStore } = await generateReportSections(extractedText, companyName, apiKey);
-    await saveVectorStore(filename, vectorStore);
+    const { sections, vectorStore, bm25Index, documentType } =
+      await generateReportSections(extractedText, companyName, apiKey);
 
-    res.status(200).json({ ...sections, companyName });
+    // Save vector store (and bm25 docs for reconstruction) to cache
+    await saveVectorStore(filename, vectorStore, bm25Index);
+
+    res.status(200).json({
+      ...sections,
+      companyName,
+      documentType: documentType?.label,
+      documentFormat: format,
+    });
   } catch (err) {
     console.error('Generate report error:', err);
     sendError(res, 500, err.message || 'Failed to generate financial analysis.');

@@ -1,4 +1,7 @@
 const multer = require('multer');
+const { getSupportedFormats } = require('../shared/documentProcessor');
+
+const { mimeTypes: supportedMimes } = getSupportedFormats();
 
 // Configure multer for memory storage (Vercel functions are stateless)
 const upload = multer({
@@ -7,10 +10,10 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024 // 10MB limit
   },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf') {
+    if (supportedMimes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Only PDF files are allowed'), false);
+      cb(new Error(`Unsupported file type: ${file.mimetype}. Supported: PDF, CSV, Excel, Text`), false);
     }
   }
 });
@@ -56,7 +59,8 @@ module.exports = async function handler(req, res) {
           message: 'File uploaded successfully',
           filename: filename,
           fileBuffer: req.file.buffer.toString('base64'), // Convert to base64 for transfer
-          mimetype: req.file.mimetype
+          mimetype: req.file.mimetype,
+          originalname: req.file.originalname,
         });
         
       } catch (error) {
@@ -74,4 +78,4 @@ module.exports.config = {
   api: {
     bodyParser: false,
   },
-}; 
+};

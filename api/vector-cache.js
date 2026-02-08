@@ -1,6 +1,7 @@
 const { OpenAIEmbeddings } = require('@langchain/openai');
 const { MemoryVectorStore } = require('langchain/vectorstores/memory');
 const { Document } = require('langchain/document');
+const { BM25Index } = require('../shared/hybridSearch');
 const fs = require('fs');
 const path = require('path');
 
@@ -14,9 +15,9 @@ if (!fs.existsSync(CACHE_DIR)) {
 const memoryCache = new Map();
 
 // Cache management functions
-const saveVectorStore = async (filename, vectorStore) => {
+const saveVectorStore = async (filename, vectorStore, bm25Index) => {
   try {
-    // Save to file cache
+    // Save documents to file cache (used for both vector + BM25 reconstruction)
     const cacheFile = path.join(CACHE_DIR, `${filename}.json`);
     const documents = vectorStore.memoryVectors.map(v => ({
       pageContent: v.pageContent,
@@ -25,14 +26,14 @@ const saveVectorStore = async (filename, vectorStore) => {
     fs.writeFileSync(cacheFile, JSON.stringify(documents));
     console.log(`Vector store saved to file for ${filename}`);
     
-    // Also save to memory cache as backup
-    memoryCache.set(filename, vectorStore);
-    console.log(`Vector store saved to memory cache for ${filename}`);
+    // Also save to memory cache as backup (includes BM25 index)
+    memoryCache.set(filename, { vectorStore, bm25Index });
+    console.log(`Vector store + BM25 saved to memory cache for ${filename}`);
   } catch (error) {
     console.error('Error saving vector store:', error);
     // Fallback to memory cache only
-    memoryCache.set(filename, vectorStore);
-    console.log(`Vector store saved to memory cache only for ${filename}`);
+    memoryCache.set(filename, { vectorStore, bm25Index });
+    console.log(`Vector store + BM25 saved to memory cache only for ${filename}`);
   }
 };
 
@@ -40,7 +41,7 @@ const loadVectorStore = async (filename, apiKey) => {
   try {
     // First try to load from memory cache
     if (memoryCache.has(filename)) {
-      console.log(`Vector store loaded from memory cache for ${filename}`);
+      console.log(`Loaded from memory cache for ${filename}`);
       return memoryCache.get(filename);
     }
     
@@ -59,13 +60,18 @@ const loadVectorStore = async (filename, apiKey) => {
       });
       
       const vectorStore = await MemoryVectorStore.fromDocuments(documents, embeddings);
+
+      // Rebuild BM25 index from the same documents
+      const bm25Index = new BM25Index(documents);
+
       // Store in memory cache for future use
-      memoryCache.set(filename, vectorStore);
-      console.log(`Vector store loaded from file and cached in memory for ${filename}`);
-      return vectorStore;
+      const cached = { vectorStore, bm25Index };
+      memoryCache.set(filename, cached);
+      console.log(`Loaded from file and cached in memory for ${filename}`);
+      return cached;
     }
     
-    console.log(`No vector store found for ${filename}`);
+    console.log(`No cache found for ${filename}`);
     return null;
   } catch (error) {
     console.error('Error loading vector store:', error);

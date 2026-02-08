@@ -18,9 +18,24 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalyze, onUrlSubmit, 
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const supportedTypes = [
+    'application/pdf',
+    'text/csv',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    'text/plain',
+  ];
+  const supportedExtensions = ['.pdf', '.csv', '.xlsx', '.xls', '.txt'];
+
+  const isFileSupported = (file: File) => {
+    if (supportedTypes.includes(file.type)) return true;
+    const ext = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+    return supportedExtensions.includes(ext);
+  };
+
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file && file.type === 'application/pdf') {
+    if (file && isFileSupported(file)) {
       setSelectedFile(file);
     }
   };
@@ -29,7 +44,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalyze, onUrlSubmit, 
     event.preventDefault();
     setIsDragOver(false);
     const file = event.dataTransfer.files[0];
-    if (file && file.type === 'application/pdf') {
+    if (file && isFileSupported(file)) {
       setSelectedFile(file);
     }
   };
@@ -94,14 +109,14 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalyze, onUrlSubmit, 
                 </p>
                 <div className="flex items-center justify-center gap-2 text-xs text-slate-500 flex-wrap">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                  <span>PDF only — 10-K, 10-Q, quarterly reports, earnings</span>
+                  <span>PDF, CSV, Excel, TXT — 10-K, 10-Q, reports, earnings, financial data</span>
                 </div>
               </div>
             </div>
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf"
+              accept=".pdf,.csv,.xlsx,.xls,.txt"
               onChange={handleFileSelect}
               className="hidden"
             />
