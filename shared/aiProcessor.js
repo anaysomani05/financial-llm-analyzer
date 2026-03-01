@@ -992,6 +992,391 @@ async function generateReportSections(extractedText, companyName, apiKey) {
 }
 
 /* ================================================================== */
+/*  Streaming report generation                                         */
+/* ================================================================== */
+
+/**
+ * Generate report sections one-by-one, calling onProgress after each.
+ *
+ * @param {string} extractedText
+ * @param {string} companyName
+ * @param {string} apiKey
+ * @param {(event: object) => void} onProgress - callback for progress/section events
+ * @returns {Promise<{ sections, vectorStore, bm25Index, documentType }>}
+ */
+async function generateReportSectionsStreaming(extractedText, companyName, apiKey, onProgress) {
+  const emit = onProgress || (() => {});
+
+  emit({ type: 'progress', message: 'Cleaning and preparing document...', stage: 'processing' });
+
+  const cleanedText = cleanText(extractedText);
+
+  emit({ type: 'progress', message: 'Classifying document type...', stage: 'classification' });
+  const docClassification = await classifyDocument(cleanedText, apiKey);
+
+  emit({ type: 'progress', message: 'Creating semantic chunks...', stage: 'chunking' });
+  const documents = await splitTextIntoSemanticChunks(cleanedText, docClassification);
+
+  emit({ type: 'progress', message: 'Building search indices...', stage: 'indexing' });
+  const { vectorStore, bm25Index } = await createSearchIndices(documents, apiKey);
+
+  const sections = {};
+
+  for (const sectionType of SECTION_TYPES) {
+    emit({ type: 'progress', message: `Generating ${sectionType}...`, stage: sectionType });
+
+    const baseQueries = SECTION_QUERIES[sectionType](companyName);
+    const expandedQueries = baseQueries.map(expandFinancialTerms);
+
+    const hints = SECTION_METADATA_HINTS[sectionType];
+    let metadataFilter;
+    if (hints?.preferredSections) {
+      metadataFilter = { sectionName: hints.preferredSections };
+    }
+
+    let relevantDocs = await multiQueryRetrieval(
+      vectorStore, expandedQueries, config.sections.chunksPerQuery, bm25Index, metadataFilter
+    );
+
+    if (relevantDocs.length < 3 && metadataFilter) {
+      const unfilteredDocs = await multiQueryRetrieval(
+        vectorStore, expandedQueries, config.sections.chunksPerQuery, bm25Index, undefined
+      );
+      const seen = new Set(relevantDocs.map((d) => d.metadata?.id));
+      for (const doc of unfilteredDocs) {
+        if (!seen.has(doc.metadata?.id)) {
+          relevantDocs.push(doc);
+          seen.add(doc.metadata?.id);
+        }
+      }
+    }
+
+    const queryForReranking = baseQueries.join(' ');
+    relevantDocs = await rerankChunks(relevantDocs, queryForReranking, apiKey, config.reranking.topK);
+
+    sections[sectionType] = await generateSectionContent(relevantDocs, sectionType, companyName, apiKey);
+
+    emit({ type: 'section', sectionKey: sectionType, content: sections[sectionType], companyName });
+
+    await sleep(500);
+  }
+
+  return { sections, vectorStore, bm25Index, documentType: docClassification };
+}
+
+/* ================================================================== */
+/*  Streaming chat completion (token-by-token)                          */
+/* ================================================================== */
+
+/**
+ * Call OpenAI chat completions with streaming enabled.
+ * Yields text chunks as they arrive.
+ *
+ * @param {string} apiKey
+ * @param {object} opts
+ * @param {(chunk: string) => void} onChunk
+ * @returns {Promise<string>} full content
+ */
+async function openaiChatCompletionStream(apiKey, { messages, max_tokens = 500, temperature = 0.1, model }, onChunk) {
+  const response = await fetch(OPENAI_CHAT_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: model || config.openai.model,
+      messages,
+      max_tokens,
+      temperature,
+      stream: true,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI API failed: ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let fullContent = '';
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data: ')) continue;
+      const data = trimmed.slice(6);
+      if (data === '[DONE]') continue;
+
+      try {
+        const parsed = JSON.parse(data);
+        const delta = parsed.choices?.[0]?.delta?.content;
+        if (delta) {
+          fullContent += delta;
+          onChunk(delta);
+        }
+      } catch {
+        // skip malformed chunks
+      }
+    }
+  }
+
+  return fullContent;
+}
+
+/**
+ * Answer a question with streaming output.
+ */
+async function answerQuestionStream(vectorStore, question, companyName, apiKey, bm25Index, onChunk) {
+  const queryInfo = await processQuery(question, apiKey);
+
+  const seen = new Set();
+  const allDocs = [];
+
+  for (const q of queryInfo.expandedQueries) {
+    const docs = await intelligentRetrieval({
+      vectorStore, bm25Index, query: q, limit: config.qa.chunks, metadataFilter: undefined,
+    });
+    for (const doc of docs) {
+      const key = doc.metadata?.id || doc.pageContent.slice(0, 120);
+      if (!seen.has(key)) { seen.add(key); allDocs.push(doc); }
+    }
+  }
+
+  const rerankedDocs = await rerankChunks(allDocs, question, apiKey, config.qa.chunks);
+
+  const contextNote =
+    queryInfo.queryType === 'comparative'
+      ? '\n- This is a comparative question — compare and contrast the relevant data points.'
+      : queryInfo.queryType === 'factual'
+        ? '\n- This is a factual question — be precise with specific numbers and dates.'
+        : '';
+
+  const relevantChunks = rerankedDocs.map((doc) => {
+    const meta = doc.metadata || {};
+    const sectionInfo = meta.sectionLabel ? ` (from: ${meta.sectionLabel})` : '';
+    return `[${meta.contentType || 'text'}${sectionInfo}]\n${doc.pageContent}`;
+  });
+
+  const answerPrompt = `You are a financial analyst answering a question about **${companyName}** based on their financial document.
+
+**Question:** ${question}
+
+**Relevant excerpts from the financial document:**
+
+${relevantChunks.map((c, i) => `[Excerpt ${i + 1}]\n${c}`).join('\n\n')}
+
+---
+
+Instructions:
+- Provide a clear, well-structured answer using markdown (**bold** for key data, bullet points where helpful).
+- Be specific with numbers, dates, and names when the document provides them.${contextNote}
+- If the information is not available in the document, clearly state: *"This information is not available in the provided document."*
+- Keep the answer concise (3-5 sentences for simple questions, more for complex ones).`;
+
+  const fullContent = await openaiChatCompletionStream(apiKey, {
+    messages: [
+      { role: 'system', content: 'You are a professional financial analyst. Provide accurate, concise answers based strictly on the provided document context. Use markdown formatting for clarity.' },
+      { role: 'user', content: answerPrompt },
+    ],
+    max_tokens: config.qa.maxTokens,
+    temperature: config.qa.temperature,
+  }, onChunk);
+
+  return fullContent;
+}
+
+/* ================================================================== */
+/*  Comparative analysis (multi-document)                               */
+/* ================================================================== */
+
+const COMPARATIVE_SECTION_PROMPTS = {
+  overview: (companyA, companyB) =>
+    `Compare the business models, market positions, and competitive advantages of **${companyA}** and **${companyB}**.
+
+Structure your analysis:
+
+## Business Model Comparison
+- Compare primary revenue streams, business segments, and operating models
+
+## Market Position
+- Compare competitive positioning, market share indicators, and economic moats
+
+## Strategic Differentiation
+- What makes each company's approach unique? Where do they overlap?
+
+Requirements:
+- Use **bold** for company names, key terms, and differentiators
+- Be specific — cite data from both documents
+- Highlight similarities AND differences`,
+
+  financialHighlights: (companyA, companyB) =>
+    `Compare the key financial metrics and performance of **${companyA}** and **${companyB}**.
+
+Structure your analysis:
+
+## Revenue & Growth Comparison
+- Side-by-side revenue figures, growth rates, and segment performance
+
+## Profitability Comparison
+- Compare margins (gross, operating, net), EBITDA, and efficiency
+
+## Balance Sheet Comparison
+- Compare cash positions, debt levels, and financial health ratios
+
+Requirements:
+- Use **bold** for all numbers and percentages
+- Present metrics side-by-side where possible
+- Note which company leads in each metric`,
+
+  keyRisks: (companyA, companyB) =>
+    `Compare the risk profiles of **${companyA}** and **${companyB}**.
+
+Structure your analysis:
+
+## Shared Risks
+- Risks that affect both companies (industry-wide, macro, regulatory)
+
+## Unique Risks — ${companyA}
+- Risks specific to ${companyA}
+
+## Unique Risks — ${companyB}
+- Risks specific to ${companyB}
+
+## Risk Assessment
+- Which company has a more favorable risk profile overall?
+
+Requirements:
+- Use **bold** for specific risk factors
+- Prioritize by significance
+- Be balanced and objective`,
+
+  managementCommentary: (companyA, companyB) =>
+    `Compare the strategic outlook and management priorities of **${companyA}** and **${companyB}**.
+
+Structure your analysis:
+
+## Strategic Direction Comparison
+- Compare long-term vision, growth strategies, and market outlook
+
+## Investment & Expansion Plans
+- Compare expansion initiatives, capital allocation, and growth priorities
+
+## Operational Focus
+- Compare efficiency programs, technology investments, organizational changes
+
+Requirements:
+- Use **bold** for key initiatives and targets
+- Focus on forward-looking statements
+- Note alignment or divergence in strategic priorities`,
+};
+
+/**
+ * Generate comparative analysis sections for two documents.
+ *
+ * @param {string} textA - Extracted text from document A
+ * @param {string} textB - Extracted text from document B
+ * @param {string} companyA - Company A name
+ * @param {string} companyB - Company B name
+ * @param {string} apiKey
+ * @param {(event: object) => void} [onProgress]
+ * @returns {Promise<object>} comparison sections
+ */
+async function generateComparisonSections(textA, textB, companyA, companyB, apiKey, onProgress) {
+  const emit = onProgress || (() => {});
+
+  emit({ type: 'progress', message: 'Processing documents for comparison...', stage: 'processing' });
+
+  const cleanedA = cleanText(textA);
+  const cleanedB = cleanText(textB);
+
+  const [docClassA, docClassB] = await Promise.all([
+    classifyDocument(cleanedA, apiKey),
+    classifyDocument(cleanedB, apiKey),
+  ]);
+
+  const [docsA, docsB] = await Promise.all([
+    splitTextIntoSemanticChunks(cleanedA, docClassA),
+    splitTextIntoSemanticChunks(cleanedB, docClassB),
+  ]);
+
+  emit({ type: 'progress', message: 'Building search indices for both documents...', stage: 'indexing' });
+
+  const [indicesA, indicesB] = await Promise.all([
+    createSearchIndices(docsA, apiKey),
+    createSearchIndices(docsB, apiKey),
+  ]);
+
+  const comparison = {};
+
+  for (const sectionType of SECTION_TYPES) {
+    emit({ type: 'progress', message: `Generating comparative ${sectionType}...`, stage: `comparison_${sectionType}` });
+
+    const baseQueries = SECTION_QUERIES[sectionType](companyA);
+    const baseQueriesB = SECTION_QUERIES[sectionType](companyB);
+
+    // Retrieve from both documents
+    const [chunksA, chunksB] = await Promise.all([
+      multiQueryRetrieval(indicesA.vectorStore, baseQueries.map(expandFinancialTerms), config.comparison.chunksPerQuery, indicesA.bm25Index),
+      multiQueryRetrieval(indicesB.vectorStore, baseQueriesB.map(expandFinancialTerms), config.comparison.chunksPerQuery, indicesB.bm25Index),
+    ]);
+
+    const contextA = chunksA.map((doc, i) => `[${companyA} - Excerpt ${i + 1}]\n${doc.pageContent}`).join('\n\n');
+    const contextB = chunksB.map((doc, i) => `[${companyB} - Excerpt ${i + 1}]\n${doc.pageContent}`).join('\n\n');
+
+    const prompt = COMPARATIVE_SECTION_PROMPTS[sectionType](companyA, companyB);
+
+    const content = await openaiChatCompletion(apiKey, {
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT_SECTIONS },
+        {
+          role: 'user',
+          content: `${prompt}
+
+---
+
+**Excerpts from ${companyA}:**
+
+${contextA}
+
+---
+
+**Excerpts from ${companyB}:**
+
+${contextB}
+
+---
+
+Now write your comparative analysis for the section above. Use markdown formatting as specified.`,
+        },
+      ],
+      max_tokens: config.comparison.maxTokens,
+      temperature: config.comparison.temperature,
+    });
+
+    comparison[sectionType] = content || '*Comparative analysis not available for this section.*';
+
+    emit({ type: 'section', sectionKey: `comparison_${sectionType}`, content: comparison[sectionType] });
+
+    await sleep(500);
+  }
+
+  return {
+    comparison,
+    indicesA,
+    indicesB,
+  };
+}
+
+/* ================================================================== */
 /*  Q&A with query understanding                                        */
 /* ================================================================== */
 
@@ -1098,7 +1483,15 @@ module.exports = {
   // Core pipeline
   extractCompanyName,
   generateReportSections,
+  generateReportSectionsStreaming,
   answerQuestion,
+  answerQuestionStream,
+
+  // Comparison
+  generateComparisonSections,
+
+  // Streaming
+  openaiChatCompletionStream,
 
   // Retrieval
   queryRelevantChunks,

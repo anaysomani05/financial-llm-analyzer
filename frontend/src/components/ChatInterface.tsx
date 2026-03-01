@@ -219,12 +219,14 @@ const MessageBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
 interface ChatInterfaceProps {
   companyName: string;
   onAskQuestion: (question: string) => Promise<string>;
+  onAskQuestionStream?: (question: string, onChunk: (chunk: string) => void) => Promise<string>;
   isLoading?: boolean;
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   companyName,
   onAskQuestion,
+  onAskQuestionStream,
   isLoading = false,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -253,36 +255,56 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         timestamp: new Date(),
       };
 
+      const assistantId = (Date.now() + 1).toString();
+
       setMessages((prev) => [...prev, userMessage]);
       setCurrentQuestion('');
       setIsAsking(true);
 
       try {
-        const answer = await onAskQuestion(question.trim());
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: (Date.now() + 1).toString(),
-            type: 'assistant',
-            content: answer,
-            timestamp: new Date(),
-          },
-        ]);
+        if (onAskQuestionStream) {
+          // Streaming mode: add empty assistant message, update progressively
+          setMessages((prev) => [
+            ...prev,
+            { id: assistantId, type: 'assistant', content: '', timestamp: new Date() },
+          ]);
+
+          await onAskQuestionStream(question.trim(), (chunk) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, content: m.content + chunk } : m
+              )
+            );
+          });
+        } else {
+          // Blocking mode (fallback)
+          const answer = await onAskQuestion(question.trim());
+          setMessages((prev) => [
+            ...prev,
+            { id: assistantId, type: 'assistant', content: answer, timestamp: new Date() },
+          ]);
+        }
       } catch {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: (Date.now() + 1).toString(),
-            type: 'assistant',
-            content: 'Something went wrong. Please try again.',
-            timestamp: new Date(),
-          },
-        ]);
+        setMessages((prev) => {
+          // If streaming added an empty message, update it; otherwise add new
+          const existing = prev.find((m) => m.id === assistantId);
+          if (existing) {
+            return prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: m.content || 'Something went wrong. Please try again.' }
+                : m
+            );
+          }
+          return [
+            ...prev,
+            { id: assistantId, type: 'assistant', content: 'Something went wrong. Please try again.', timestamp: new Date() },
+          ];
+        });
       } finally {
         setIsAsking(false);
       }
     },
-    [isAsking, onAskQuestion]
+    [isAsking, onAskQuestion, onAskQuestionStream]
   );
 
   const handleClear = () => {
@@ -355,7 +377,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               <MessageBubble key={message.id} message={message} />
             ))}
 
-            {isAsking && <TypingIndicator />}
+            {isAsking && !onAskQuestionStream && <TypingIndicator />}
 
             <div ref={messagesEndRef} />
           </div>

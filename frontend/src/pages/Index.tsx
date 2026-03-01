@@ -2,6 +2,7 @@ import './Index.css';
 import React, { useState, useCallback } from 'react';
 import { FileUpload } from '@/components/FileUpload';
 import { ReportDisplay } from '@/components/ReportDisplay';
+import { ComparisonView } from '@/components/ComparisonView';
 import { ChatInterface } from '@/components/ChatInterface';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,15 +16,19 @@ import {
   Download,
   RotateCcw,
   MessageCircle,
+  GitCompareArrows,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import type { CreditReport, ReportSectionKey } from '@/types';
+import type { CreditReport, ReportSectionKey, ComparisonReport, SSEEvent } from '@/types';
 import { REPORT_SECTIONS } from '@/constants/reportSections';
 import {
   uploadDocument,
   generateReport,
+  generateReportStream,
   fetchPdfFromUrl,
   askQuestion as apiAskQuestion,
+  askQuestionStream,
+  compareReportsStream,
 } from '@/lib/api';
 
 /* ------------------------------------------------------------------ */
@@ -40,24 +45,80 @@ const Index = () => {
   const [generatedReport, setGeneratedReport] = useState<CreditReport | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [sessionFilename, setSessionFilename] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>('overview');
+  const [progressMessage, setProgressMessage] = useState<string>('');
+
+  // Comparison state
+  const [comparisonReport, setComparisonReport] = useState<ComparisonReport | null>(null);
+  const [isComparing, setIsComparing] = useState(false);
+  const [sessionFilenameA, setSessionFilenameA] = useState<string | null>(null);
+  const [sessionFilenameB, setSessionFilenameB] = useState<string | null>(null);
+
   const { toast } = useToast();
 
   /* ── Handlers ── */
 
   const handleAnalyze = async (file: File) => {
     setIsAnalyzing(true);
+    setIsStreaming(true);
+    setProgressMessage('Uploading document...');
     toast({
       title: 'Analysis started',
-      description: 'Uploading and analyzing the document. This may take a few minutes.',
+      description: 'Uploading and analyzing the document.',
     });
     try {
       const { filename } = await uploadDocument(file);
-      const report = await generateReport(filename);
-      setGeneratedReport(report);
       setSessionFilename(filename);
+
+      // Initialize empty report and show dashboard immediately
+      const emptyReport: CreditReport = {
+        companyName: 'Analyzing...',
+        overview: '',
+        financialHighlights: '',
+        keyRisks: '',
+        managementCommentary: '',
+        generatedAt: new Date().toISOString(),
+      };
+      setGeneratedReport(emptyReport);
       setActiveView('overview');
+
+      let firstSectionSeen = false;
+
+      await generateReportStream(filename, (event: SSEEvent) => {
+        switch (event.type) {
+          case 'progress':
+            setProgressMessage(event.message);
+            if (event.companyName) {
+              setGeneratedReport((prev) =>
+                prev ? { ...prev, companyName: event.companyName! } : prev
+              );
+            }
+            break;
+          case 'section':
+            setGeneratedReport((prev) =>
+              prev ? { ...prev, [event.sectionKey]: event.content } : prev
+            );
+            // Auto-navigate to first completed section
+            if (!firstSectionSeen) {
+              firstSectionSeen = true;
+              setActiveView(event.sectionKey);
+            }
+            break;
+          case 'complete':
+            if (event.companyName) {
+              setGeneratedReport((prev) =>
+                prev ? { ...prev, companyName: event.companyName! } : prev
+              );
+            }
+            break;
+          case 'error':
+            throw new Error(event.message);
+        }
+      });
+
+      setProgressMessage('');
       toast({ title: 'Analysis complete', description: 'Your report has been generated.' });
     } catch (err) {
       console.error('Analyze error:', err);
@@ -66,8 +127,14 @@ const Index = () => {
         description: err instanceof Error ? err.message : 'Something went wrong.',
         variant: 'destructive',
       });
+      // Reset if no content was generated
+      if (generatedReport && !generatedReport.overview && !generatedReport.financialHighlights) {
+        setGeneratedReport(null);
+      }
     } finally {
       setIsAnalyzing(false);
+      setIsStreaming(false);
+      setProgressMessage('');
     }
   };
 
@@ -89,38 +156,180 @@ const Index = () => {
     }
   };
 
+  const handleCompare = async (fileA: File, fileB: File) => {
+    setIsComparing(true);
+    setIsAnalyzing(true);
+    setIsStreaming(true);
+    setProgressMessage('Uploading documents...');
+    toast({
+      title: 'Comparison started',
+      description: 'Uploading and comparing both documents.',
+    });
+
+    try {
+      const [uploadA, uploadB] = await Promise.all([
+        uploadDocument(fileA),
+        uploadDocument(fileB),
+      ]);
+
+      setSessionFilenameA(uploadA.filename);
+      setSessionFilenameB(uploadB.filename);
+
+      // Initialize empty comparison report
+      const emptyComparison: ComparisonReport = {
+        companyA: 'Analyzing...',
+        companyB: 'Analyzing...',
+        reportA: {
+          companyName: '', overview: '', financialHighlights: '', keyRisks: '', managementCommentary: '', generatedAt: '',
+        },
+        reportB: {
+          companyName: '', overview: '', financialHighlights: '', keyRisks: '', managementCommentary: '', generatedAt: '',
+        },
+        comparison: { overview: '', financialHighlights: '', keyRisks: '', managementCommentary: '' },
+        generatedAt: new Date().toISOString(),
+      };
+      setComparisonReport(emptyComparison);
+      setActiveView('overview');
+
+      await compareReportsStream(uploadA.filename, uploadB.filename, (event: SSEEvent) => {
+        switch (event.type) {
+          case 'progress':
+            setProgressMessage(event.message);
+            if ('companyA' in event && event.companyA) {
+              setComparisonReport((prev) =>
+                prev ? { ...prev, companyA: event.companyA!, companyB: event.companyB! } : prev
+              );
+            }
+            break;
+          case 'section': {
+            const sectionEvent = event;
+            if (sectionEvent.document === 'A') {
+              setComparisonReport((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  reportA: { ...prev.reportA, [sectionEvent.sectionKey]: sectionEvent.content },
+                };
+              });
+            } else if (sectionEvent.document === 'B') {
+              setComparisonReport((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  reportB: { ...prev.reportB, [sectionEvent.sectionKey]: sectionEvent.content },
+                };
+              });
+            } else if (sectionEvent.sectionKey.startsWith('comparison_')) {
+              const key = sectionEvent.sectionKey.replace('comparison_', '') as ReportSectionKey;
+              setComparisonReport((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  comparison: { ...prev.comparison, [key]: sectionEvent.content },
+                };
+              });
+            }
+            break;
+          }
+          case 'complete':
+            if (event.companyA) {
+              setComparisonReport((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  companyA: event.companyA!,
+                  companyB: event.companyB!,
+                  reportA: event.reportA || prev.reportA,
+                  reportB: event.reportB || prev.reportB,
+                  comparison: event.comparison || prev.comparison,
+                  generatedAt: event.generatedAt || prev.generatedAt,
+                };
+              });
+            }
+            break;
+          case 'error':
+            throw new Error(event.message);
+        }
+      });
+
+      setProgressMessage('');
+      toast({ title: 'Comparison complete', description: 'Your comparative analysis is ready.' });
+    } catch (err) {
+      console.error('Comparison error:', err);
+      toast({
+        title: 'Comparison failed',
+        description: err instanceof Error ? err.message : 'Something went wrong.',
+        variant: 'destructive',
+      });
+      if (comparisonReport && !comparisonReport.comparison.overview) {
+        setComparisonReport(null);
+      }
+    } finally {
+      setIsComparing(false);
+      setIsAnalyzing(false);
+      setIsStreaming(false);
+      setProgressMessage('');
+    }
+  };
+
   const resetApplication = () => {
     setGeneratedReport(null);
+    setComparisonReport(null);
     setIsUploading(false);
     setIsAnalyzing(false);
+    setIsStreaming(false);
+    setIsComparing(false);
     setSessionFilename(null);
+    setSessionFilenameA(null);
+    setSessionFilenameB(null);
     setActiveView('overview');
+    setProgressMessage('');
   };
 
   const handleAskQuestion = async (question: string): Promise<string> => {
-    if (!generatedReport || !sessionFilename) {
+    if (!sessionFilename && !sessionFilenameA) {
       return 'Cannot ask questions until a report has been generated.';
     }
+    const companyName = generatedReport?.companyName || comparisonReport?.companyA || '';
+    const filename = sessionFilename || sessionFilenameA || '';
     try {
-      return await apiAskQuestion({
-        filename: sessionFilename,
-        question,
-        companyName: generatedReport.companyName,
-      });
+      return await apiAskQuestion({ filename, question, companyName });
     } catch (err) {
       console.error('Error answering question:', err);
       return err instanceof Error ? err.message : 'An unexpected error occurred.';
     }
   };
 
+  const handleAskQuestionStream = async (
+    question: string,
+    onChunk: (chunk: string) => void
+  ): Promise<string> => {
+    const companyName = generatedReport?.companyName || comparisonReport?.companyA || '';
+    const filename = sessionFilename || sessionFilenameA || '';
+    if (!filename) {
+      const msg = 'Cannot ask questions until a report has been generated.';
+      onChunk(msg);
+      return msg;
+    }
+    try {
+      return await askQuestionStream({ filename, question, companyName }, onChunk);
+    } catch (err) {
+      console.error('Error streaming answer:', err);
+      const msg = err instanceof Error ? err.message : 'An unexpected error occurred.';
+      onChunk(msg);
+      return msg;
+    }
+  };
+
   const handleDownload = useCallback(() => {
-    if (!generatedReport) return;
+    const report = generatedReport;
+    if (!report) return;
     const divider = '═'.repeat(56);
     const sectionDivider = '─'.repeat(40);
     const parts = [
       'FINANCIAL ANALYSIS REPORT',
-      `Company: ${generatedReport.companyName}`,
-      `Generated: ${new Date(generatedReport.generatedAt).toLocaleDateString('en-US', {
+      `Company: ${report.companyName}`,
+      `Generated: ${new Date(report.generatedAt).toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
@@ -128,7 +337,7 @@ const Index = () => {
       divider,
       ...REPORT_SECTIONS.map(
         (s) =>
-          `\n${sectionDivider}\n${s.title.toUpperCase()}\n${s.description}\n${sectionDivider}\n\n${generatedReport[s.key] ?? 'N/A'}`
+          `\n${sectionDivider}\n${s.title.toUpperCase()}\n${s.description}\n${sectionDivider}\n\n${report[s.key] ?? 'N/A'}`
       ),
       `\n${divider}`,
       'Generated by FinancialLLM Analyzer',
@@ -137,7 +346,7 @@ const Index = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${generatedReport.companyName.replace(/[^a-z0-9]/gi, '_')}_analysis.txt`;
+    a.download = `${report.companyName.replace(/[^a-z0-9]/gi, '_')}_analysis.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -147,7 +356,9 @@ const Index = () => {
 
   /* ── Landing page (no report) ── */
 
-  if (!generatedReport) {
+  const hasReport = generatedReport || comparisonReport;
+
+  if (!hasReport) {
     return (
       <div className="page">
         <header className="header">
@@ -204,6 +415,7 @@ const Index = () => {
               <FileUpload
                 onAnalyze={handleAnalyze}
                 onUrlSubmit={handleUrlSubmit}
+                onCompare={handleCompare}
                 isAnalyzing={isAnalyzing}
                 isLoading={isUploading}
               />
@@ -217,7 +429,7 @@ const Index = () => {
               Powered by{' '}
               <strong className="text-slate-700">FinancialLLM Analyzer</strong>
               <span className="hidden sm:inline">
-                {' '}— Document intelligence with RAG
+                {' '}&mdash; Document intelligence with RAG
               </span>
             </p>
           </div>
@@ -228,10 +440,13 @@ const Index = () => {
 
   /* ── Dashboard layout (report generated) ── */
 
-  const reportDate = new Date(generatedReport.generatedAt).toLocaleDateString(
-    'en-US',
-    { month: 'short', day: 'numeric', year: 'numeric' }
-  );
+  const displayName = comparisonReport
+    ? `${comparisonReport.companyA} vs ${comparisonReport.companyB}`
+    : generatedReport!.companyName;
+
+  const reportDate = new Date(
+    (comparisonReport?.generatedAt || generatedReport!.generatedAt)
+  ).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
   return (
     <div className="h-screen flex flex-col bg-slate-50">
@@ -246,10 +461,19 @@ const Index = () => {
               FinancialLLM Analyzer
             </h1>
           </div>
-          {/* Company name on mobile (sidebar hides it) */}
-          <p className="lg:hidden text-sm font-semibold text-slate-700 truncate max-w-[180px]">
-            {generatedReport.companyName}
-          </p>
+          <div className="flex items-center gap-3">
+            {/* Progress indicator during streaming */}
+            {isStreaming && progressMessage && (
+              <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500">
+                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                <span>{progressMessage}</span>
+              </div>
+            )}
+            {/* Company name on mobile (sidebar hides it) */}
+            <p className="lg:hidden text-sm font-semibold text-slate-700 truncate max-w-[180px]">
+              {displayName}
+            </p>
+          </div>
         </div>
       </header>
 
@@ -261,10 +485,12 @@ const Index = () => {
           <div className="p-3 lg:p-5 border-b border-slate-100">
             <div className="hidden lg:block">
               <h2 className="font-bold text-slate-900 text-base truncate">
-                {generatedReport.companyName}
+                {displayName}
               </h2>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                <span className="text-xs text-slate-500">Analysis Report</span>
+                <span className="text-xs text-slate-500">
+                  {comparisonReport ? 'Comparison' : 'Analysis Report'}
+                </span>
                 <span className="text-slate-300">·</span>
                 <span className="text-xs text-slate-400 inline-flex items-center gap-1">
                   <Calendar className="h-3 w-3" />
@@ -275,7 +501,11 @@ const Index = () => {
             {/* Mobile: company icon */}
             <div className="lg:hidden flex justify-center">
               <div className="bg-slate-800 p-2 rounded-lg">
-                <TrendingUp className="h-4 w-4 text-amber-400" />
+                {comparisonReport ? (
+                  <GitCompareArrows className="h-4 w-4 text-amber-400" />
+                ) : (
+                  <TrendingUp className="h-4 w-4 text-amber-400" />
+                )}
               </div>
             </div>
           </div>
@@ -289,6 +519,12 @@ const Index = () => {
             {REPORT_SECTIONS.map((section) => {
               const Icon = section.icon;
               const isActive = activeView === section.key;
+
+              // Show a dot indicator for sections that have content during streaming
+              const sectionContent = comparisonReport
+                ? comparisonReport.comparison?.[section.key]
+                : generatedReport?.[section.key];
+              const hasContent = !!sectionContent?.trim();
 
               return (
                 <button
@@ -320,10 +556,13 @@ const Index = () => {
                   <span className="hidden lg:inline truncate">
                     {section.title}
                   </span>
-                  {isActive && (
+                  {isActive && hasContent && (
                     <span
                       className={`hidden lg:block ml-auto w-1.5 h-1.5 rounded-full ${section.bulletColor}`}
                     />
+                  )}
+                  {isStreaming && !hasContent && !isActive && (
+                    <span className="hidden lg:block ml-auto w-1.5 h-1.5 rounded-full bg-slate-300 animate-pulse" />
                   )}
                 </button>
               );
@@ -364,15 +603,17 @@ const Index = () => {
 
           {/* Bottom actions */}
           <div className="p-2 lg:p-3 border-t border-slate-100 space-y-1.5">
-            <Button
-              onClick={handleDownload}
-              variant="outline"
-              size="sm"
-              className="w-full justify-center lg:justify-start gap-2 border-slate-200 text-slate-600 hover:bg-slate-50"
-            >
-              <Download className="h-4 w-4 shrink-0" />
-              <span className="hidden lg:inline">Export Report</span>
-            </Button>
+            {generatedReport && (
+              <Button
+                onClick={handleDownload}
+                variant="outline"
+                size="sm"
+                className="w-full justify-center lg:justify-start gap-2 border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                <Download className="h-4 w-4 shrink-0" />
+                <span className="hidden lg:inline">Export Report</span>
+              </Button>
+            )}
             <Button
               onClick={resetApplication}
               variant="ghost"
@@ -390,15 +631,25 @@ const Index = () => {
           {activeView === 'chat' ? (
             <div className="max-w-3xl mx-auto h-full flex flex-col">
               <ChatInterface
-                companyName={generatedReport.companyName}
+                companyName={displayName}
                 onAskQuestion={handleAskQuestion}
+                onAskQuestionStream={handleAskQuestionStream}
+              />
+            </div>
+          ) : comparisonReport ? (
+            <div className="max-w-4xl mx-auto overflow-y-auto h-full">
+              <ComparisonView
+                comparisonReport={comparisonReport}
+                sectionKey={activeView}
+                isStreaming={isStreaming}
               />
             </div>
           ) : (
             <div className="max-w-4xl mx-auto overflow-y-auto h-full">
               <ReportDisplay
-                report={generatedReport}
+                report={generatedReport!}
                 sectionKey={activeView}
+                isStreaming={isStreaming}
               />
             </div>
           )}

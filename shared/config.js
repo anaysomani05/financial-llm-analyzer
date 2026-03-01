@@ -53,6 +53,13 @@ module.exports = {
     sampleLength: parseInt(process.env.CLASSIFICATION_SAMPLE_LENGTH, 10) || 5000,
   },
 
+  /* ---- New: Comparison ---- */
+  comparison: {
+    maxTokens: parseInt(process.env.COMPARISON_MAX_TOKENS, 10) || 1500,
+    chunksPerQuery: parseInt(process.env.COMPARISON_CHUNKS_PER_QUERY, 10) || 3,
+    temperature: 0.05,
+  },
+
   /* ---- New: Supported file formats ---- */
   supportedFormats: {
     pdf: { mimeTypes: ['application/pdf'], extensions: ['.pdf'] },

@@ -1,7 +1,7 @@
 /**
  * Central API client. All backend calls go through here.
  */
-import type { CreditReport } from '@/types';
+import type { CreditReport, SSEEvent } from '@/types';
 
 const API_BASE = '/api';
 
@@ -82,4 +82,151 @@ export async function askQuestion(params: {
   });
   const data = await handleResponse<{ answer: string }>(res);
   return data.answer;
+}
+
+/* ------------------------------------------------------------------ */
+/*  SSE helpers                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Parse SSE lines from a ReadableStream response body.
+ */
+async function readSSEStream(
+  res: Response,
+  onEvent: (event: SSEEvent) => void
+): Promise<void> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data: ')) continue;
+      try {
+        const parsed = JSON.parse(trimmed.slice(6)) as SSEEvent;
+        onEvent(parsed);
+      } catch {
+        // skip malformed lines
+      }
+    }
+  }
+
+  // Process remaining buffer
+  if (buffer.trim().startsWith('data: ')) {
+    try {
+      const parsed = JSON.parse(buffer.trim().slice(6)) as SSEEvent;
+      onEvent(parsed);
+    } catch {
+      // skip
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Streaming report generation                                         */
+/* ------------------------------------------------------------------ */
+
+export async function generateReportStream(
+  filename: string,
+  onEvent: (event: SSEEvent) => void
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/generate-report-stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try {
+      const json = JSON.parse(text);
+      if (json.error) message = json.error;
+    } catch {
+      // use text
+    }
+    throw new Error(message || `Request failed: ${res.status}`);
+  }
+
+  await readSSEStream(res, onEvent);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Streaming Q&A                                                       */
+/* ------------------------------------------------------------------ */
+
+export async function askQuestionStream(
+  params: { filename: string; question: string; companyName: string },
+  onChunk: (chunk: string) => void
+): Promise<string> {
+  const res = await fetch(`${API_BASE}/ask-question-stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try {
+      const json = JSON.parse(text);
+      if (json.error) message = json.error;
+    } catch {
+      // use text
+    }
+    throw new Error(message || `Request failed: ${res.status}`);
+  }
+
+  let fullContent = '';
+
+  await readSSEStream(res, (event) => {
+    if (event.type === 'chunk') {
+      onChunk(event.content);
+      fullContent += event.content;
+    } else if (event.type === 'done') {
+      fullContent = event.content;
+    } else if (event.type === 'error') {
+      throw new Error(event.message);
+    }
+  });
+
+  return fullContent;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Streaming comparison                                                */
+/* ------------------------------------------------------------------ */
+
+export async function compareReportsStream(
+  filenameA: string,
+  filenameB: string,
+  onEvent: (event: SSEEvent) => void
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/compare-reports-stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filenameA, filenameB }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try {
+      const json = JSON.parse(text);
+      if (json.error) message = json.error;
+    } catch {
+      // use text
+    }
+    throw new Error(message || `Request failed: ${res.status}`);
+  }
+
+  await readSSEStream(res, onEvent);
 }

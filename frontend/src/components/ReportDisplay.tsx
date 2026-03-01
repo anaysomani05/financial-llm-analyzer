@@ -164,17 +164,48 @@ const PlainTextRenderer: React.FC<{
 );
 
 /* ------------------------------------------------------------------ */
+/*  Loading skeleton for streaming sections                            */
+/* ------------------------------------------------------------------ */
+
+const SectionSkeleton: React.FC<{ section: ReportSectionConfig }> = ({ section }) => (
+  <div className="space-y-4 animate-pulse">
+    {/* Heading skeleton */}
+    <div className="flex items-center gap-2.5">
+      <div className={`w-1 h-5 rounded-full ${section.bulletColor} opacity-40`} />
+      <div className="h-4 w-40 bg-slate-200 rounded" />
+    </div>
+    {/* Paragraph lines */}
+    {[...Array(3)].map((_, g) => (
+      <div key={g} className="space-y-2 mt-4">
+        <div className="h-3 w-32 bg-slate-200 rounded" />
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="flex gap-3 p-2.5">
+            <div className={`mt-1 w-2 h-2 rounded-full ${section.bulletColor} opacity-30 shrink-0`} />
+            <div className="flex-1 space-y-1.5">
+              <div className="h-3 bg-slate-200 rounded" style={{ width: `${85 - i * 10}%` }} />
+              <div className="h-3 bg-slate-100 rounded" style={{ width: `${65 - i * 5}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    ))}
+  </div>
+);
+
+/* ------------------------------------------------------------------ */
 /*  Main component – single section viewer                             */
 /* ------------------------------------------------------------------ */
 
 interface ReportDisplayProps {
   report: CreditReport;
   sectionKey: ReportSectionKey;
+  isStreaming?: boolean;
 }
 
 export const ReportDisplay: React.FC<ReportDisplayProps> = ({
   report,
   sectionKey,
+  isStreaming = false,
 }) => {
   const section = REPORT_SECTIONS.find((s) => s.key === sectionKey)!;
   const content = report[sectionKey] ?? '';
@@ -238,6 +269,8 @@ export const ReportDisplay: React.FC<ReportDisplayProps> = ({
                 </ReactMarkdown>
               </div>
             )
+          ) : isStreaming ? (
+            <SectionSkeleton section={section} />
           ) : (
             <p className="text-slate-400 italic text-sm py-4 text-center">
               No content available for this section.
