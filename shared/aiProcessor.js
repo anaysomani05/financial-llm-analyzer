@@ -687,7 +687,36 @@ Requirements:
 - Describe trends: "**Revenue** grew from **$X** to **$Y**, a **Z%** increase"
 - Compare periods (YoY, QoQ) where the document provides data
 - One metric per bullet — do not combine multiple facts
-- Only include data explicitly found in the document`,
+- Only include data explicitly found in the document
+
+IMPORTANT: After your markdown analysis, append a fenced block with structured chart data. Rules:
+1. Only use numbers EXPLICITLY stated in the document — NEVER estimate, interpolate, or invent data
+2. Pick 2-4 charts that visualize DIFFERENT aspects (e.g. don't make two revenue charts)
+3. Use diverse chart types — don't repeat the same type for every chart
+4. Each chart must have at least 2 data points
+5. If a metric only appears for one period, use a "bar" chart to compare across categories, NOT a "line" chart
+
+Use this exact format:
+
+~~~chartdata
+{
+  "charts": [
+    {
+      "type": "bar|pie|line",
+      "title": "Chart Title",
+      "data": [{"name": "Label", "value": 123.4}],
+      "unit": "$B or % or other unit"
+    }
+  ]
+}
+~~~
+
+Chart type guide:
+- "bar": comparing categories or metrics side-by-side (e.g. revenue by segment, margin types)
+- "pie": showing composition/breakdown of a whole (e.g. revenue split, geographic mix)
+- "line": ONLY for trends with 3+ sequential time periods — do NOT use for 2 data points
+
+If the document lacks sufficient numerical data for meaningful charts, omit the chartdata block entirely.`,
 
   keyRisks: (companyName) =>
     `Identify and categorize the key risks facing **${companyName}** based on the provided financial document.

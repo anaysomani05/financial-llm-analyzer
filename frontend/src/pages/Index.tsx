@@ -21,6 +21,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import type { CreditReport, ReportSectionKey, ComparisonReport, SSEEvent } from '@/types';
 import { REPORT_SECTIONS } from '@/constants/reportSections';
+import { DEMO_REPORT } from '@/constants/demoReport';
 import {
   uploadDocument,
   generateReport,
@@ -55,6 +56,9 @@ const Index = () => {
   const [isComparing, setIsComparing] = useState(false);
   const [sessionFilenameA, setSessionFilenameA] = useState<string | null>(null);
   const [sessionFilenameB, setSessionFilenameB] = useState<string | null>(null);
+  // Per-document progress during comparison streaming
+  const [compareProgressA, setCompareProgressA] = useState<'idle' | 'processing' | 'done'>('idle');
+  const [compareProgressB, setCompareProgressB] = useState<'idle' | 'processing' | 'done'>('idle');
 
   const { toast } = useToast();
 
@@ -156,10 +160,18 @@ const Index = () => {
     }
   };
 
+  const handleLoadDemo = () => {
+    setGeneratedReport(DEMO_REPORT);
+    setActiveView('overview');
+    toast({ title: 'Demo loaded', description: 'Showing Apple Inc. FY2024 sample analysis.' });
+  };
+
   const handleCompare = async (fileA: File, fileB: File) => {
     setIsComparing(true);
     setIsAnalyzing(true);
     setIsStreaming(true);
+    setCompareProgressA('idle');
+    setCompareProgressB('idle');
     setProgressMessage('Uploading documents...');
     toast({
       title: 'Comparison started',
@@ -195,6 +207,20 @@ const Index = () => {
         switch (event.type) {
           case 'progress':
             setProgressMessage(event.message);
+            // Drive per-document progress indicators based on stage
+            if (event.type === 'progress') {
+              const stage = (event as { stage?: string }).stage ?? '';
+              if (stage === 'reportA') {
+                setCompareProgressA('processing');
+                setCompareProgressB('idle');
+              } else if (stage === 'reportB') {
+                setCompareProgressA('done');
+                setCompareProgressB('processing');
+              } else if (stage === 'comparison' || stage === 'complete') {
+                setCompareProgressA('done');
+                setCompareProgressB('done');
+              }
+            }
             if ('companyA' in event && event.companyA) {
               setComparisonReport((prev) =>
                 prev ? { ...prev, companyA: event.companyA!, companyB: event.companyB! } : prev
@@ -268,6 +294,8 @@ const Index = () => {
       setIsComparing(false);
       setIsAnalyzing(false);
       setIsStreaming(false);
+      setCompareProgressA('idle');
+      setCompareProgressB('idle');
       setProgressMessage('');
     }
   };
@@ -284,6 +312,8 @@ const Index = () => {
     setSessionFilenameB(null);
     setActiveView('overview');
     setProgressMessage('');
+    setCompareProgressA('idle');
+    setCompareProgressB('idle');
   };
 
   const handleAskQuestion = async (question: string): Promise<string> => {
@@ -416,6 +446,7 @@ const Index = () => {
                 onAnalyze={handleAnalyze}
                 onUrlSubmit={handleUrlSubmit}
                 onCompare={handleCompare}
+                onDemo={handleLoadDemo}
                 isAnalyzing={isAnalyzing}
                 isLoading={isUploading}
               />
@@ -462,8 +493,33 @@ const Index = () => {
             </h1>
           </div>
           <div className="flex items-center gap-3">
-            {/* Progress indicator during streaming */}
-            {isStreaming && progressMessage && (
+            {/* Per-document comparison progress */}
+            {isStreaming && isComparing && (compareProgressA !== 'idle' || compareProgressB !== 'idle') && (
+              <div className="hidden sm:flex items-center gap-3">
+                {(['A', 'B'] as const).map((slot) => {
+                  const status = slot === 'A' ? compareProgressA : compareProgressB;
+                  const name = slot === 'A'
+                    ? (comparisonReport?.companyA || `Doc ${slot}`)
+                    : (comparisonReport?.companyB || `Doc ${slot}`);
+                  return (
+                    <div key={slot} className="flex items-center gap-1.5">
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${
+                        status === 'done' ? 'bg-emerald-500' :
+                        status === 'processing' ? 'bg-blue-500 animate-pulse' :
+                        'bg-slate-300'
+                      }`} />
+                      <span className={`text-xs font-medium max-w-[100px] truncate ${
+                        status === 'done' ? 'text-emerald-600' :
+                        status === 'processing' ? 'text-blue-600' :
+                        'text-slate-400'
+                      }`}>{name}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {/* Single-doc progress indicator */}
+            {isStreaming && !isComparing && progressMessage && (
               <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500">
                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
                 <span>{progressMessage}</span>

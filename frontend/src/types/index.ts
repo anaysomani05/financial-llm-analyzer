@@ -1,6 +1,22 @@
 /**
  * Shared types for the app and API boundaries.
  */
+
+/* ------------------------------------------------------------------ */
+/*  Chart types for financial highlights                                */
+/* ------------------------------------------------------------------ */
+
+export interface ChartDataPoint {
+  name: string;
+  value: number;
+}
+
+export interface ChartSpec {
+  type: 'bar' | 'pie' | 'line';
+  title: string;
+  data: ChartDataPoint[];
+  unit?: string;
+}
 export interface CreditReport {
   companyName: string;
   overview: string;

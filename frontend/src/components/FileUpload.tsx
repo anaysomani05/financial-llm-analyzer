@@ -3,17 +3,18 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, FileText, AlertCircle, Link2, CheckCircle2, GitCompareArrows } from 'lucide-react';
+import { Upload, FileText, AlertCircle, Link2, CheckCircle2, GitCompareArrows, Sparkles } from 'lucide-react';
 
 interface FileUploadProps {
   onAnalyze: (file: File) => void;
   onUrlSubmit: (url: string) => void;
   onCompare?: (fileA: File, fileB: File) => void;
+  onDemo?: () => void;
   isAnalyzing?: boolean;
   isLoading?: boolean;
 }
 
-export const FileUpload: React.FC<FileUploadProps> = ({ onAnalyze, onUrlSubmit, onCompare, isAnalyzing = false, isLoading = false }) => {
+export const FileUpload: React.FC<FileUploadProps> = ({ onAnalyze, onUrlSubmit, onCompare, onDemo, isAnalyzing = false, isLoading = false }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [url, setUrl] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
@@ -223,6 +224,22 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onAnalyze, onUrlSubmit, 
               className="hidden"
             />
           </Card>
+
+          {onDemo && (
+            <div className="flex items-center justify-center gap-3">
+              <div className="flex-1 h-px bg-slate-200" />
+              <button
+                type="button"
+                onClick={onDemo}
+                disabled={isAnalyzing}
+                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 transition-colors font-medium disabled:opacity-40"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Try with Apple Inc. FY2024 demo
+              </button>
+              <div className="flex-1 h-px bg-slate-200" />
+            </div>
+          )}
 
           {selectedFile && (
             <Card className="p-5 rounded-2xl border border-slate-200 bg-white shadow-sm">

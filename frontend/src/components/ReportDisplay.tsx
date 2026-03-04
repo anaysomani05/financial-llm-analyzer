@@ -2,8 +2,9 @@ import React, { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Card } from '@/components/ui/card';
-import type { CreditReport, ReportSectionKey } from '@/types';
+import type { CreditReport, ReportSectionKey, ChartSpec } from '@/types';
 import { REPORT_SECTIONS, type ReportSectionConfig } from '@/constants/reportSections';
+import { FinancialCharts } from './FinancialCharts';
 
 /* ------------------------------------------------------------------ */
 /*  Markdown component factory – section-colored custom renderers      */
@@ -118,6 +119,27 @@ function looksLikeMarkdown(text: string): boolean {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Chart data extraction from ~~~chartdata fenced blocks              */
+/* ------------------------------------------------------------------ */
+
+function extractChartData(content: string): { markdown: string; charts: ChartSpec[] | null } {
+  const regex = /~~~chartdata\s*([\s\S]*?)~~~/;
+  const match = content.match(regex);
+  if (!match) return { markdown: content, charts: null };
+
+  const markdown = content.replace(regex, '').trim();
+  try {
+    const parsed = JSON.parse(match[1].trim());
+    const charts: ChartSpec[] = parsed.charts?.filter(
+      (c: any) => c && c.type && c.title && Array.isArray(c.data) && c.data.length > 0
+    );
+    return { markdown, charts: charts?.length ? charts : null };
+  } catch {
+    return { markdown, charts: null };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Plain-text renderer (fallback for legacy reports)                  */
 /* ------------------------------------------------------------------ */
 
@@ -208,7 +230,13 @@ export const ReportDisplay: React.FC<ReportDisplayProps> = ({
   isStreaming = false,
 }) => {
   const section = REPORT_SECTIONS.find((s) => s.key === sectionKey)!;
-  const content = report[sectionKey] ?? '';
+  const rawContent = report[sectionKey] ?? '';
+
+  // Extract chart data for financialHighlights section
+  const { markdown: content, charts } = useMemo(() => {
+    if (sectionKey === 'financialHighlights') return extractChartData(rawContent);
+    return { markdown: rawContent, charts: null };
+  }, [rawContent, sectionKey]);
 
   const mdComponents = useMemo(
     () => buildMarkdownComponents(section),
@@ -253,6 +281,7 @@ export const ReportDisplay: React.FC<ReportDisplayProps> = ({
 
         {/* Body */}
         <div className="p-5 overflow-y-auto report-scroll section-body">
+          {charts && <FinancialCharts charts={charts} />}
           {content.trim() ? (
             fallbackGroups ? (
               <PlainTextRenderer
