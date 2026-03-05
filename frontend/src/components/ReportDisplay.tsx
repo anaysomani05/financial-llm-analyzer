@@ -1,36 +1,22 @@
 import React, { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Card } from '@/components/ui/card';
 import type { CreditReport, ReportSectionKey, ChartSpec } from '@/types';
 import { REPORT_SECTIONS, type ReportSectionConfig } from '@/constants/reportSections';
 import { FinancialCharts } from './FinancialCharts';
 
-/* ------------------------------------------------------------------ */
-/*  Markdown component factory – section-colored custom renderers      */
-/* ------------------------------------------------------------------ */
-
-function buildMarkdownComponents(section: ReportSectionConfig) {
+function buildMarkdownComponents() {
   return {
     h2: ({ children }: { children?: React.ReactNode }) => (
-      <div className="report-group flex items-center gap-2.5 mt-6 mb-3 first:mt-0">
-        <div className={`w-1 h-5 rounded-full ${section.bulletColor}`} />
-        <h2
-          className={`text-sm font-semibold uppercase tracking-wide ${section.headingColor}`}
-        >
-          {children}
-        </h2>
-      </div>
+      <h2 className="text-xs font-semibold uppercase tracking-widest text-[#9ca3af] mt-8 mb-3 first:mt-0">
+        {children}
+      </h2>
     ),
     h3: ({ children }: { children?: React.ReactNode }) => (
-      <h3 className="text-sm font-semibold text-slate-800 mt-4 mb-2">
-        {children}
-      </h3>
+      <h3 className="text-sm font-semibold text-[#171717] mt-5 mb-2">{children}</h3>
     ),
     p: ({ children }: { children?: React.ReactNode }) => (
-      <p className="text-[0.8125rem] text-slate-700 leading-relaxed mb-3">
-        {children}
-      </p>
+      <p className="text-[0.8125rem] text-[#374151] leading-[1.7] mb-3">{children}</p>
     ),
     ul: ({ children }: { children?: React.ReactNode }) => (
       <ul className="space-y-1 mb-4">{children}</ul>
@@ -39,53 +25,41 @@ function buildMarkdownComponents(section: ReportSectionConfig) {
       <ol className="space-y-1 mb-4 list-decimal list-inside">{children}</ol>
     ),
     li: ({ children }: { children?: React.ReactNode }) => (
-      <li className="report-item flex gap-3 p-2.5 rounded-lg hover:bg-slate-50/80 transition-colors text-[0.8125rem] text-slate-700 leading-relaxed">
-        <span
-          className={`mt-[7px] w-2 h-2 rounded-full shrink-0 ${section.bulletColor} opacity-80`}
-        />
+      <li className="flex gap-2.5 py-1 text-[0.8125rem] text-[#374151] leading-[1.7]">
+        <span className="mt-[9px] w-1 h-1 rounded-full shrink-0 bg-[#d4d4d4]" />
         <span className="flex-1">{children}</span>
       </li>
     ),
     strong: ({ children }: { children?: React.ReactNode }) => (
-      <strong className="font-semibold text-slate-900">{children}</strong>
+      <strong className="font-semibold text-[#171717]">{children}</strong>
     ),
     em: ({ children }: { children?: React.ReactNode }) => (
-      <em className="italic text-slate-500">{children}</em>
+      <em className="italic text-[#6b7280]">{children}</em>
     ),
     table: ({ children }: { children?: React.ReactNode }) => (
-      <div className="overflow-x-auto my-4 rounded-lg border border-slate-200">
+      <div className="overflow-x-auto my-4 rounded border border-[#e5e7eb]">
         <table className="w-full text-sm">{children}</table>
       </div>
     ),
     thead: ({ children }: { children?: React.ReactNode }) => (
-      <thead className="bg-slate-50 text-slate-700 text-xs font-medium uppercase tracking-wider">
+      <thead className="bg-[#f9fafb] text-[#6b7280] text-xs font-medium uppercase tracking-wider">
         {children}
       </thead>
     ),
     th: ({ children }: { children?: React.ReactNode }) => (
-      <th className="px-4 py-2.5 text-left border-b border-slate-200">
-        {children}
-      </th>
+      <th className="px-4 py-2.5 text-left border-b border-[#e5e7eb]">{children}</th>
     ),
     td: ({ children }: { children?: React.ReactNode }) => (
-      <td className="px-4 py-2 border-b border-slate-100 text-slate-700">
-        {children}
-      </td>
+      <td className="px-4 py-2 border-b border-[#f3f4f6] text-[#374151]">{children}</td>
     ),
-    hr: () => <hr className="my-4 border-slate-200" />,
+    hr: () => <hr className="my-6 border-[#e5e7eb]" />,
     blockquote: ({ children }: { children?: React.ReactNode }) => (
-      <blockquote
-        className={`border-l-3 ${section.bulletColor.replace('bg-', 'border-')} pl-4 my-3 text-sm text-slate-600 italic`}
-      >
+      <blockquote className="border-l-2 border-[#e5e7eb] pl-4 my-3 text-sm text-[#6b7280] italic">
         {children}
       </blockquote>
     ),
   };
 }
-
-/* ------------------------------------------------------------------ */
-/*  Fallback parser for legacy plain-text / bullet-point content       */
-/* ------------------------------------------------------------------ */
 
 interface ParsedGroup {
   heading?: string;
@@ -94,14 +68,9 @@ interface ParsedGroup {
 
 function parseContent(raw: string): ParsedGroup[] {
   if (!raw?.trim()) return [];
-  const lines = raw
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-
+  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
   const groups: ParsedGroup[] = [];
   let current: ParsedGroup = { items: [] };
-
   for (const line of lines) {
     if (line.startsWith('•')) {
       current.items.push(line.replace(/^•\s*/, ''));
@@ -118,15 +87,10 @@ function looksLikeMarkdown(text: string): boolean {
   return /^#{1,3}\s|^\*\*|\*\*$|^-\s|^\d+\.\s/m.test(text);
 }
 
-/* ------------------------------------------------------------------ */
-/*  Chart data extraction from ~~~chartdata fenced blocks              */
-/* ------------------------------------------------------------------ */
-
 function extractChartData(content: string): { markdown: string; charts: ChartSpec[] | null } {
   const regex = /~~~chartdata\s*([\s\S]*?)~~~/;
   const match = content.match(regex);
   if (!match) return { markdown: content, charts: null };
-
   const markdown = content.replace(regex, '').trim();
   try {
     const parsed = JSON.parse(match[1].trim());
@@ -139,44 +103,20 @@ function extractChartData(content: string): { markdown: string; charts: ChartSpe
   }
 }
 
-/* ------------------------------------------------------------------ */
-/*  Plain-text renderer (fallback for legacy reports)                  */
-/* ------------------------------------------------------------------ */
-
-const PlainTextRenderer: React.FC<{
-  groups: ParsedGroup[];
-  section: ReportSectionConfig;
-}> = ({ groups, section }) => (
+const PlainTextRenderer: React.FC<{ groups: ParsedGroup[] }> = ({ groups }) => (
   <div className="space-y-1">
     {groups.map((group, i) => (
-      <div
-        key={i}
-        className={`report-group ${i > 0 ? 'mt-5' : ''}`}
-        style={{ animationDelay: `${i * 60}ms` }}
-      >
+      <div key={i} className={`${i > 0 ? 'mt-6' : ''}`}>
         {group.heading && (
-          <div className="flex items-center gap-2.5 mb-1 pl-1">
-            <div className={`w-1 h-4 rounded-full ${section.bulletColor}`} />
-            <h4
-              className={`text-xs font-semibold uppercase tracking-widest ${section.headingColor}`}
-            >
-              {group.heading}
-            </h4>
-          </div>
+          <h4 className="text-xs font-semibold uppercase tracking-widest text-[#9ca3af] mb-2">
+            {group.heading}
+          </h4>
         )}
         <div className="space-y-0.5">
           {group.items.map((item, j) => (
-            <div
-              key={j}
-              className="report-item flex gap-3.5 p-3 rounded-lg hover:bg-slate-50/80 transition-colors"
-              style={{ animationDelay: `${i * 60 + (j + 1) * 40}ms` }}
-            >
-              <span
-                className={`mt-[7px] w-2 h-2 rounded-full shrink-0 ${section.bulletColor} opacity-80`}
-              />
-              <p className="text-[0.8125rem] text-slate-700 leading-relaxed">
-                {item}
-              </p>
+            <div key={j} className="flex gap-2.5 py-1">
+              <span className="mt-[9px] w-1 h-1 rounded-full shrink-0 bg-[#d4d4d4]" />
+              <p className="text-[0.8125rem] text-[#374151] leading-[1.7]">{item}</p>
             </div>
           ))}
         </div>
@@ -185,27 +125,18 @@ const PlainTextRenderer: React.FC<{
   </div>
 );
 
-/* ------------------------------------------------------------------ */
-/*  Loading skeleton for streaming sections                            */
-/* ------------------------------------------------------------------ */
-
-const SectionSkeleton: React.FC<{ section: ReportSectionConfig }> = ({ section }) => (
+const SectionSkeleton: React.FC = () => (
   <div className="space-y-4 animate-pulse">
-    {/* Heading skeleton */}
-    <div className="flex items-center gap-2.5">
-      <div className={`w-1 h-5 rounded-full ${section.bulletColor} opacity-40`} />
-      <div className="h-4 w-40 bg-slate-200 rounded" />
-    </div>
-    {/* Paragraph lines */}
+    <div className="h-3 w-28 bg-[#f3f4f6] rounded" />
     {[...Array(3)].map((_, g) => (
       <div key={g} className="space-y-2 mt-4">
-        <div className="h-3 w-32 bg-slate-200 rounded" />
+        <div className="h-3 w-32 bg-[#f3f4f6] rounded" />
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="flex gap-3 p-2.5">
-            <div className={`mt-1 w-2 h-2 rounded-full ${section.bulletColor} opacity-30 shrink-0`} />
+          <div key={i} className="flex gap-3 py-1">
+            <div className="mt-1 w-1 h-1 rounded-full bg-[#e5e7eb] shrink-0" />
             <div className="flex-1 space-y-1.5">
-              <div className="h-3 bg-slate-200 rounded" style={{ width: `${85 - i * 10}%` }} />
-              <div className="h-3 bg-slate-100 rounded" style={{ width: `${65 - i * 5}%` }} />
+              <div className="h-3 bg-[#f3f4f6] rounded" style={{ width: `${85 - i * 10}%` }} />
+              <div className="h-3 bg-[#f9fafb] rounded" style={{ width: `${65 - i * 5}%` }} />
             </div>
           </div>
         ))}
@@ -213,10 +144,6 @@ const SectionSkeleton: React.FC<{ section: ReportSectionConfig }> = ({ section }
     ))}
   </div>
 );
-
-/* ------------------------------------------------------------------ */
-/*  Main component – single section viewer                             */
-/* ------------------------------------------------------------------ */
 
 interface ReportDisplayProps {
   report: CreditReport;
@@ -232,16 +159,12 @@ export const ReportDisplay: React.FC<ReportDisplayProps> = ({
   const section = REPORT_SECTIONS.find((s) => s.key === sectionKey)!;
   const rawContent = report[sectionKey] ?? '';
 
-  // Extract chart data for financialHighlights section
   const { markdown: content, charts } = useMemo(() => {
     if (sectionKey === 'financialHighlights') return extractChartData(rawContent);
     return { markdown: rawContent, charts: null };
   }, [rawContent, sectionKey]);
 
-  const mdComponents = useMemo(
-    () => buildMarkdownComponents(section),
-    [section]
-  );
+  const mdComponents = useMemo(() => buildMarkdownComponents(), []);
 
   const fallbackGroups = useMemo(() => {
     if (looksLikeMarkdown(content)) return null;
@@ -249,64 +172,32 @@ export const ReportDisplay: React.FC<ReportDisplayProps> = ({
   }, [content]);
 
   if (!report?.companyName) {
-    return (
-      <div className="text-slate-500 py-8 text-center">
-        No report data available.
-      </div>
-    );
+    return <div className="text-[#9ca3af] py-8 text-center text-sm">No report data available.</div>;
   }
 
   return (
     <div key={sectionKey} className="report-panel">
-      <Card className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        {/* Colored accent bar */}
-        <div className={`h-1 ${section.accentBg}`} />
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-[#171717]">{section.title}</h3>
+        <p className="text-sm text-[#9ca3af] mt-0.5">{section.description}</p>
+      </div>
 
-        {/* Header */}
-        <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/30">
-          <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-xl ${section.iconBg}`}>
-              <section.icon
-                className={`h-5 w-5 ${section.iconColor}`}
-              />
-            </div>
-            <div>
-              <h3 className="font-semibold text-slate-900">{section.title}</h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {section.description}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Body */}
-        <div className="p-5 overflow-y-auto report-scroll section-body">
-          {charts && <FinancialCharts charts={charts} />}
-          {content.trim() ? (
-            fallbackGroups ? (
-              <PlainTextRenderer
-                groups={fallbackGroups}
-                section={section}
-              />
-            ) : (
-              <div className="report-md-content">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={mdComponents as any}
-                >
-                  {content}
-                </ReactMarkdown>
-              </div>
-            )
-          ) : isStreaming ? (
-            <SectionSkeleton section={section} />
+      <div className="overflow-y-auto report-scroll section-body">
+        {charts && <FinancialCharts charts={charts} />}
+        {content.trim() ? (
+          fallbackGroups ? (
+            <PlainTextRenderer groups={fallbackGroups} />
           ) : (
-            <p className="text-slate-400 italic text-sm py-4 text-center">
-              No content available for this section.
-            </p>
-          )}
-        </div>
-      </Card>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents as any}>
+              {content}
+            </ReactMarkdown>
+          )
+        ) : isStreaming ? (
+          <SectionSkeleton />
+        ) : (
+          <p className="text-[#9ca3af] text-sm py-4 text-center">No content available for this section.</p>
+        )}
+      </div>
     </div>
   );
 };

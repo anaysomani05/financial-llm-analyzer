@@ -16,13 +16,7 @@ import {
 } from 'recharts';
 import type { ChartSpec } from '@/types';
 
-/* Each chart in the grid gets its own color palette for visual distinction */
-const PALETTES = [
-  ['#059669', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0'],  // emerald
-  ['#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'],  // blue
-  ['#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe'],  // violet
-  ['#ea580c', '#f97316', '#fb923c', '#fdba74', '#fed7aa'],  // orange
-];
+const PALETTE = ['#171717', '#6b7280', '#9ca3af', '#d4d4d4', '#e5e7eb'];
 
 const formatValue = (value: number, unit?: string) => {
   if (!unit) return String(value);
@@ -38,52 +32,42 @@ const CustomTooltip = ({ active, payload, unit }: any) => {
   if (!active || !payload?.length) return null;
   const entry = payload[0].payload ?? payload[0];
   return (
-    <div className="bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-md text-xs">
-      <p className="font-medium text-slate-700">{entry.name ?? payload[0].name}</p>
-      <p className="font-semibold" style={{ color: payload[0].color || '#059669' }}>
+    <div className="bg-white border border-[#e5e7eb] rounded px-3 py-2 text-xs shadow-sm">
+      <p className="text-[#6b7280]">{entry.name ?? payload[0].name}</p>
+      <p className="font-semibold text-[#171717]">
         {formatValue(entry.value ?? payload[0].value, unit)}
       </p>
     </div>
   );
 };
 
-const BORDER_COLORS = [
-  'border-emerald-200', 'border-blue-200', 'border-violet-200', 'border-orange-200',
-];
-const BG_COLORS = [
-  'from-emerald-50/60', 'from-blue-50/60', 'from-violet-50/60', 'from-orange-50/60',
-];
-const TITLE_COLORS = [
-  'text-emerald-800', 'text-blue-800', 'text-violet-800', 'text-orange-800',
-];
-
-const renderBarChart = (spec: ChartSpec, palette: string[]) => (
+const renderBarChart = (spec: ChartSpec) => (
   <ResponsiveContainer width="100%" height={220}>
     <BarChart data={spec.data} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+      <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
       <XAxis
         dataKey="name"
-        tick={{ fontSize: 11, fill: '#64748b' }}
+        tick={{ fontSize: 11, fill: '#9ca3af' }}
         tickLine={false}
-        axisLine={{ stroke: '#e2e8f0' }}
+        axisLine={{ stroke: '#e5e7eb' }}
       />
       <YAxis
-        tick={{ fontSize: 11, fill: '#64748b' }}
+        tick={{ fontSize: 11, fill: '#9ca3af' }}
         tickLine={false}
         axisLine={false}
         tickFormatter={(v) => formatValue(v, spec.unit)}
       />
       <Tooltip content={<CustomTooltip unit={spec.unit} />} />
-      <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={52}>
+      <Bar dataKey="value" radius={[3, 3, 0, 0]} maxBarSize={48}>
         {spec.data.map((_, i) => (
-          <Cell key={i} fill={palette[i % palette.length]} />
+          <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
         ))}
       </Bar>
     </BarChart>
   </ResponsiveContainer>
 );
 
-const renderPieChart = (spec: ChartSpec, palette: string[]) => (
+const renderPieChart = (spec: ChartSpec) => (
   <ResponsiveContainer width="100%" height={240}>
     <PieChart>
       <Pie
@@ -97,7 +81,7 @@ const renderPieChart = (spec: ChartSpec, palette: string[]) => (
         nameKey="name"
       >
         {spec.data.map((_, i) => (
-          <Cell key={i} fill={palette[i % palette.length]} />
+          <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
         ))}
       </Pie>
       <Tooltip content={<CustomTooltip unit={spec.unit} />} />
@@ -105,24 +89,24 @@ const renderPieChart = (spec: ChartSpec, palette: string[]) => (
         wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
         iconType="circle"
         iconSize={8}
-        formatter={(val: string) => <span className="text-slate-600">{val}</span>}
+        formatter={(val: string) => <span className="text-[#6b7280]">{val}</span>}
       />
     </PieChart>
   </ResponsiveContainer>
 );
 
-const renderLineChart = (spec: ChartSpec, palette: string[]) => (
+const renderLineChart = (spec: ChartSpec) => (
   <ResponsiveContainer width="100%" height={220}>
     <LineChart data={spec.data} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+      <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
       <XAxis
         dataKey="name"
-        tick={{ fontSize: 11, fill: '#64748b' }}
+        tick={{ fontSize: 11, fill: '#9ca3af' }}
         tickLine={false}
-        axisLine={{ stroke: '#e2e8f0' }}
+        axisLine={{ stroke: '#e5e7eb' }}
       />
       <YAxis
-        tick={{ fontSize: 11, fill: '#64748b' }}
+        tick={{ fontSize: 11, fill: '#9ca3af' }}
         tickLine={false}
         axisLine={false}
         tickFormatter={(v) => formatValue(v, spec.unit)}
@@ -131,16 +115,16 @@ const renderLineChart = (spec: ChartSpec, palette: string[]) => (
       <Line
         type="monotone"
         dataKey="value"
-        stroke={palette[0]}
-        strokeWidth={2.5}
-        dot={{ fill: palette[0], r: 5, strokeWidth: 2, stroke: '#fff' }}
-        activeDot={{ r: 7, stroke: palette[0], strokeWidth: 2 }}
+        stroke="#171717"
+        strokeWidth={2}
+        dot={{ fill: '#171717', r: 3, strokeWidth: 2, stroke: '#fff' }}
+        activeDot={{ r: 5, stroke: '#171717', strokeWidth: 2 }}
       />
     </LineChart>
   </ResponsiveContainer>
 );
 
-type ChartRenderer = (spec: ChartSpec, palette: string[]) => React.ReactNode;
+type ChartRenderer = (spec: ChartSpec) => React.ReactNode;
 const RENDERERS: Record<ChartSpec['type'], ChartRenderer> = {
   bar: renderBarChart,
   pie: renderPieChart,
@@ -160,18 +144,12 @@ export const FinancialCharts: React.FC<FinancialChartsProps> = ({ charts }) => {
         const renderer = RENDERERS[spec.type];
         if (!renderer || !spec.data?.length) return null;
 
-        const paletteIdx = i % PALETTES.length;
-        const palette = PALETTES[paletteIdx];
-
         return (
-          <div
-            key={i}
-            className={`bg-gradient-to-br ${BG_COLORS[paletteIdx]} to-white border ${BORDER_COLORS[paletteIdx]} rounded-xl p-4`}
-          >
-            <h4 className={`text-xs font-semibold ${TITLE_COLORS[paletteIdx]} uppercase tracking-wide mb-3`}>
+          <div key={i} className="border border-[#e5e7eb] rounded p-4">
+            <h4 className="text-xs font-medium text-[#9ca3af] uppercase tracking-wide mb-3">
               {spec.title}
             </h4>
-            {renderer(spec, palette)}
+            {renderer(spec)}
           </div>
         );
       })}
